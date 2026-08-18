@@ -49,6 +49,8 @@ def creer_plan(demande: DemandeIntention):
         resultat = planner.planifier(demande.intention)
     except planner.CleManquante as manque:
         raise HTTPException(status_code=503, detail=str(manque))
+    except planner.BoucleTropLongue as trop_long:
+        raise HTTPException(status_code=504, detail=str(trop_long))
     except AuthenticationError:
         # La cle est presente mais Claude la refuse : revoquee, mal copiee,
         # ou pas encore mise a jour sur l'hebergeur apres une rotation.
