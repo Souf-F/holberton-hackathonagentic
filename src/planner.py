@@ -32,8 +32,22 @@ Les actions possibles sont : creer une fiche employe, creer une tache GitHub,
 envoyer un message, generer un document, poser un evenement de calendrier."""
 
 
+class CleManquante(RuntimeError):
+    """Levee quand aucune cle API n'est configuree."""
+
+
 def _client() -> Anthropic:
-    """Le client lit ANTHROPIC_API_KEY dans l'environnement."""
+    """Le client lit ANTHROPIC_API_KEY dans l'environnement.
+
+    On verifie nous-memes plutot que de laisser remonter l'erreur du SDK :
+    quelqu'un qui clone le projet sans cle doit comprendre en une phrase ce
+    qui lui manque.
+    """
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise CleManquante(
+            "Aucune cle API. Copiez .env.example en .env et renseignez "
+            "ANTHROPIC_API_KEY, puis relancez le serveur."
+        )
     return Anthropic()
 
 

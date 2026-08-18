@@ -44,7 +44,10 @@ def creer_plan(demande: DemandeIntention):
     plan_id = db.creer_plan(demande.intention)
     db.tracer(plan_id, "PLAN_CREE", "HUMAIN", demande.intention)
 
-    resultat = planner.planifier(demande.intention)
+    try:
+        resultat = planner.planifier(demande.intention)
+    except planner.CleManquante as manque:
+        raise HTTPException(status_code=503, detail=str(manque))
 
     db.enregistrer_reponse(plan_id, resultat["reponse"], resultat)
     db.tracer(plan_id, "PLAN_PROPOSE", "AGENT")
