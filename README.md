@@ -29,11 +29,21 @@ git clone https://github.com/Souf-F/holberton-hackathonagentic.git
 cd holberton-hackathonagentic
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # puis renseigner ANTHROPIC_API_KEY
-uvicorn src.main:app --reload
+cp .env.example .env
+```
+
+**Ouvrir `.env` et coller votre cle Anthropic** apres `ANTHROPIC_API_KEY=`
+
+```bash
+./lancer.sh
 ```
 
 Puis ouvrir **http://127.0.0.1:8000**
+
+`lancer.sh` limite la surveillance du rechargement automatique a `src/` et
+`web/`. Sans ca, uvicorn observe aussi `.venv/`, qui contient des milliers de
+fichiers installes par pip : demarrage plus lent, parfois des redemarrages en
+boucle. Une seule commande a retenir, la meme pour tout le monde.
 
 La base SQLite et ses quatre tables sont creees automatiquement au premier
 demarrage, dans `data/pennyworth.db`.
