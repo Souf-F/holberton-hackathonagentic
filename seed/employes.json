@@ -1,35 +1,41 @@
 [
   {
+    "id": "u001",
     "nom": "Julie Martin",
     "poste": "Developpeuse backend",
     "equipe": "Plateforme",
     "manager": "Karim Haddad"
   },
   {
+    "id": "u002",
     "nom": "Karim Haddad",
     "poste": "Tech lead",
     "equipe": "Plateforme",
     "manager": "Nadia Ferrand"
   },
   {
+    "id": "u003",
     "nom": "Sarah Dubois",
     "poste": "Designer produit",
     "equipe": "Design",
     "manager": "Nadia Ferrand"
   },
   {
+    "id": "u004",
     "nom": "Thomas Lefevre",
     "poste": "Developpeur frontend",
     "equipe": "Plateforme",
     "manager": "Karim Haddad"
   },
   {
+    "id": "u005",
     "nom": "Nadia Ferrand",
     "poste": "Directrice technique",
     "equipe": "Direction",
     "manager": null
   },
   {
+    "id": "u006",
     "nom": "Lina Bensaid",
     "poste": "Alternante data",
     "equipe": "Data",

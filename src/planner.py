@@ -13,6 +13,7 @@ cote serveur, lues depuis .env. Le navigateur n'appelle jamais Anthropic.
 import json
 import os
 import time
+from datetime import date
 
 from anthropic import Anthropic, AuthenticationError
 
@@ -113,7 +114,12 @@ def planifier(intention: str) -> dict:
     S'il ne demande rien, sa reponse est finale.
     """
     client = _client()
-    messages = [{"role": "user", "content": intention}]
+    # Sans la date du jour, Claude devine l'annee d'une date relative
+    # ("le 24 aout") et se trompe. On la lui donne explicitement plutot
+    # que de laisser un outil comme read_calendar recevoir un mauvais
+    # argument.
+    aujourdhui = f"Nous sommes le {date.today().isoformat()}."
+    messages = [{"role": "user", "content": f"{aujourdhui}\n\n{intention}"}]
     trace = []
     tokens_entree_total = 0
     tokens_sortie_total = 0

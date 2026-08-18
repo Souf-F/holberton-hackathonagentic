@@ -16,10 +16,12 @@ SCHEMA = {
     "description": (
         "Cherche la fiche d'un collaborateur de l'entreprise par son nom "
         "ou une partie de son nom (recherche insensible a la casse). "
-        "Renvoie sa fiche (poste, equipe, manager) si trouve, ou une "
-        "reponse indiquant qu'aucun resultat n'a ete trouve. A utiliser "
-        "des qu'il faut connaitre le poste, l'equipe ou le manager de "
-        "quelqu'un avant de proposer une action qui le concerne."
+        "Renvoie sa fiche (identifiant, poste, equipe, manager) si "
+        "trouve, ou une reponse indiquant qu'aucun resultat n'a ete "
+        "trouve. A utiliser des qu'il faut connaitre le poste, l'equipe "
+        "ou le manager de quelqu'un avant de proposer une action qui le "
+        "concerne. L'identifiant renvoye (champ id) est celui a "
+        "utiliser comme user_id pour l'outil read_calendar."
     ),
     "input_schema": {
         "type": "object",
