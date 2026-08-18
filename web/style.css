@@ -237,3 +237,124 @@ button:disabled { opacity: 0.5; cursor: wait; }
     button { width: 100%; }
     h1 { margin-bottom: 1.25rem; }
 }
+
+/* --- Ecran 2 : la liste des actions --- */
+
+#ecran-plan {
+    width: 100%;
+    max-width: 40rem;
+}
+
+#ecran-plan h1 { text-align: left; margin-bottom: 0.5rem; }
+
+.intention-affichee {
+    color: var(--texte-doux);
+    font-style: italic;
+    margin: 0 0 1.25rem;
+}
+
+.action {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.9rem;
+    margin-top: 0.6rem;
+    background: var(--fond-carte);
+    border: 1px solid var(--bordure);
+    border-radius: 0.75rem;
+    animation: apparition 0.3s ease-out;
+}
+
+.action input[type="checkbox"] {
+    width: 1.15rem;
+    height: 1.15rem;
+    margin-top: 0.2rem;
+    accent-color: var(--accent);
+    flex-shrink: 0;
+}
+
+.action-contenu { flex: 1; min-width: 0; }
+
+.action-titre { font-weight: 600; }
+
+.action-raison {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--texte-doux);
+}
+
+.badges {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.badge {
+    padding: 0.15rem 0.55rem;
+    font-size: 0.75rem;
+    border-radius: 1rem;
+    background: var(--fond);
+    border: 1px solid var(--bordure);
+    color: var(--texte-doux);
+}
+
+.badge-irreversible {
+    color: var(--erreur);
+    background: var(--erreur-fond);
+    border-color: #f3d4cf;
+}
+
+.badge-bloquee {
+    color: var(--texte-doux);
+    text-decoration: line-through;
+}
+
+.badge-execute {
+    color: #1a7a3c;
+    background: #eaf6ee;
+    border-color: #cdeada;
+}
+
+.action.etat-refusee,
+.action.etat-bloquee { opacity: 0.6; }
+
+/* --- La barre d'ajout, sous la liste --- */
+
+.barre-ajout {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+}
+
+.barre-ajout input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.7rem 1rem;
+    font-size: 0.9rem;
+    color: var(--texte);
+    background: var(--fond);
+    border: 1px dashed var(--bordure);
+    border-radius: 1.5rem;
+}
+
+.barre-ajout button {
+    padding: 0.7rem 1.1rem;
+    font-size: 0.9rem;
+    min-height: auto;
+}
+
+#bouton-executer {
+    display: block;
+    width: 100%;
+    margin-top: 1.5rem;
+    padding: 0.9rem;
+}
+
+#message-execution:empty { margin: 0; }
+#message-execution { margin-top: 1rem; }
+
+@media (max-width: 520px) {
+    .barre-ajout { flex-direction: column; }
+    .barre-ajout button { width: 100%; }
+}

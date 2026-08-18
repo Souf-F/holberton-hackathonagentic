@@ -10,54 +10,139 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <h1>Pennyworth</h1>
 
-    <form id="formulaire">
-        <input id="intention" type="text" autocomplete="off"
-               placeholder="Que dois-je préparer ?" required>
-        <button id="envoyer" type="submit">Demander</button>
-    </form>
+    <!-- Ecran 1 : l'intention. Visible tant qu'aucun plan n'est charge. -->
+    <section id="ecran-intention">
+        <h1>Pennyworth</h1>
 
-    <p class="exemple" id="exemple">
-        Exemple : prépare l'arrivée de Jean, stagiaire dev, lundi
-    </p>
+        <form id="formulaire">
+            <input id="intention" type="text" autocomplete="off"
+                   placeholder="Que dois-je préparer ?" required>
+            <button id="envoyer" type="submit">Demander</button>
+        </form>
 
-    <div id="resultat"></div>
+        <p class="exemple" id="exemple">
+            Exemple : prépare l'arrivée de Jean, stagiaire dev, lundi
+        </p>
+    </section>
+
+    <!-- Ecran 2 : le plan. Cache tant qu'aucun plan n'existe. -->
+    <section id="ecran-plan" hidden>
+        <h1>Pennyworth</h1>
+        <p class="intention-affichee" id="intention-affichee"></p>
+
+        <div id="reponse-agent"></div>
+        <div id="meta"></div>
+
+        <div id="liste-actions"></div>
+
+        <form id="form-ajout" class="barre-ajout">
+            <input id="ajout-champ" type="text" autocomplete="off"
+                   placeholder="+ Ajouter une tâche">
+            <button id="ajout-bouton" type="submit">Ajouter</button>
+        </form>
+
+        <button id="bouton-executer" type="button">
+            Exécuter les tâches cochées
+        </button>
+
+        <div id="message-execution"></div>
+
+        <details class="debug" id="debug-plan">
+            <summary>Voir les appels d'outils</summary>
+        </details>
+    </section>
 
     <script>
+        // --- Etat courant, en memoire ET dans l'URL (?plan=ID) ---
+        // C'est l'URL qui porte la persistance : recharger la page relit
+        // le meme parametre, donc recharge le meme plan depuis la base.
+        let planCourant = null;
+        let actionsCourantes = [];
+
+        const ecranIntention = document.getElementById("ecran-intention");
+        const ecranPlan = document.getElementById("ecran-plan");
+
         const formulaire = document.getElementById("formulaire");
         const champ = document.getElementById("intention");
         const bouton = document.getElementById("envoyer");
-        const resultat = document.getElementById("resultat");
         const exemple = document.getElementById("exemple");
 
-        // L'exemple ne s'affiche que pendant qu'on ecrit, pour ne pas
-        // encombrer l'ecran une fois qu'on sait deja quoi taper.
+        const intentionAffichee = document.getElementById("intention-affichee");
+        const reponseAgent = document.getElementById("reponse-agent");
+        const meta = document.getElementById("meta");
+        const listeActions = document.getElementById("liste-actions");
+        const formAjout = document.getElementById("form-ajout");
+        const ajoutChamp = document.getElementById("ajout-champ");
+        const ajoutBouton = document.getElementById("ajout-bouton");
+        const boutonExecuter = document.getElementById("bouton-executer");
+        const messageExecution = document.getElementById("message-execution");
+        const debugPlan = document.getElementById("debug-plan");
+
+        // Noms d'outils, en francais, pour l'affichage seulement. Le code
+        // continue de manipuler le nom technique (outil), jamais celui-ci.
+        const LIBELLES_OUTILS = {
+            create_employee_record: "Créer la fiche employé",
+            create_github_issue: "Créer une tâche GitHub",
+            send_message: "Envoyer un message",
+            generate_file: "Générer un document",
+            create_calendar_event: "Poser un événement de calendrier",
+        };
+
         champ.addEventListener("focus", () => exemple.classList.add("visible"));
         champ.addEventListener("blur", () => exemple.classList.remove("visible"));
 
+        // --- Chargement initial : y a-t-il un plan dans l'URL ? ---
+        window.addEventListener("DOMContentLoaded", () => {
+            const idDansUrl = new URLSearchParams(location.search).get("plan");
+            if (idDansUrl) {
+                chargerPlan(Number(idDansUrl));
+            }
+        });
+
+        async function chargerPlan(planId) {
+            const reponse = await fetch(`/api/plans/${planId}`);
+            if (!reponse.ok) {
+                // Le plan de l'URL n'existe plus : on repart de l'ecran 1
+                // plutot que d'afficher une erreur bloquante.
+                history.replaceState(null, "", location.pathname);
+                return;
+            }
+            const donnees = await reponse.json();
+            planCourant = planId;
+            actionsCourantes = donnees.actions || [];
+            afficherEcranPlan(donnees.intention, donnees.reponse || "");
+            rendreActions();
+        }
+
+        function afficherEcranPlan(intention, reponseTexte) {
+            ecranIntention.hidden = true;
+            ecranPlan.hidden = false;
+            intentionAffichee.textContent = `« ${intention} »`;
+            if (reponseTexte) {
+                reponseAgent.innerHTML =
+                    `<div class="carte"><pre>${echapper(reponseTexte)}</pre></div>`;
+            }
+        }
+
+        function echapper(texte) {
+            const div = document.createElement("div");
+            div.textContent = texte;
+            return div.innerHTML;
+        }
+
+        // --- Ecran 1 : creation d'un nouveau plan ---
         formulaire.addEventListener("submit", async (evenement) => {
             evenement.preventDefault();
-
             bouton.disabled = true;
-            document.body.classList.add("avec-resultat");
-            resultat.innerHTML = `
-                <div class="attente">
-                    Pennyworth réfléchit
-                    <span class="points"><span></span><span></span><span></span></span>
-                </div>`;
 
             const debut = performance.now();
-
             try {
-                // Le navigateur parle uniquement à notre serveur.
-                // Il n'appelle jamais Anthropic : la clé reste côté serveur.
                 const reponse = await fetch("/api/plans", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ intention: champ.value })
+                    body: JSON.stringify({ intention: champ.value }),
                 });
-
                 const latenceMs = Math.round(performance.now() - debut);
 
                 if (!reponse.ok) {
@@ -66,60 +151,207 @@
                 }
 
                 const donnees = await reponse.json();
-                afficher(donnees, latenceMs);
+                planCourant = donnees.plan_id;
+                actionsCourantes = donnees.actions || [];
+
+                // Le plan_id entre dans l'URL : c'est ce qui permet de
+                // recharger la page sans rien perdre.
+                history.pushState(null, "", `?plan=${planCourant}`);
+
+                afficherEcranPlan(champ.value, donnees.reponse);
+                rendreActions();
+                rendreMeta(donnees, latenceMs);
+                rendreDebug(donnees.trace || []);
             } catch (erreur) {
-                resultat.innerHTML =
+                reponseAgent.innerHTML =
                     `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+                ecranIntention.hidden = true;
+                ecranPlan.hidden = false;
             } finally {
                 bouton.disabled = false;
             }
         });
 
-        function afficher(donnees, latenceMs) {
-            const carte = document.createElement("div");
-            carte.className = "carte";
-            const texte = document.createElement("pre");
-            texte.textContent = donnees.reponse;
-            carte.appendChild(texte);
+        // --- Ecran 2 : la barre d'ajout, relance le meme planificateur ---
+        formAjout.addEventListener("submit", async (evenement) => {
+            evenement.preventDefault();
+            if (!ajoutChamp.value.trim()) return;
+            ajoutBouton.disabled = true;
 
-            const meta = construireMeta(donnees, latenceMs);
-            const debug = construireDebug(donnees.trace || []);
+            const debut = performance.now();
+            try {
+                const reponse = await fetch(`/api/plans/${planCourant}/ajouter`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ intention: ajoutChamp.value }),
+                });
+                const latenceMs = Math.round(performance.now() - debut);
 
-            resultat.replaceChildren(carte, meta, debug);
+                if (!reponse.ok) {
+                    const erreur = await reponse.json();
+                    throw new Error(erreur.detail || "Erreur du serveur");
+                }
+
+                const donnees = await reponse.json();
+                actionsCourantes = donnees.actions || [];
+                ajoutChamp.value = "";
+
+                rendreActions();
+                rendreMeta(donnees, latenceMs);
+                rendreDebug(donnees.trace || []);
+            } catch (erreur) {
+                messageExecution.innerHTML =
+                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+            } finally {
+                ajoutBouton.disabled = false;
+            }
+        });
+
+        // --- La liste des actions, cochables ---
+        function rendreActions() {
+            listeActions.replaceChildren();
+
+            for (const action of actionsCourantes) {
+                const ligne = document.createElement("div");
+                ligne.className = "action etat-" + action.etat.toLowerCase();
+
+                const caseACocher = document.createElement("input");
+                caseACocher.type = "checkbox";
+                caseACocher.dataset.actionId = action.id;
+                // Decochee par defaut : le choix le plus important de
+                // l'ecran. Si l'action a deja un etat definitif, la case
+                // reflete cet etat et devient non modifiable.
+                const decisionsPrises = ["APPROUVEE", "EXECUTEE", "ECHOUEE", "COMPENSEE"];
+                caseACocher.checked = decisionsPrises.includes(action.etat);
+                caseACocher.disabled = action.etat !== "PROPOSEE";
+
+                const contenu = document.createElement("div");
+                contenu.className = "action-contenu";
+
+                const titre = document.createElement("div");
+                titre.className = "action-titre";
+                titre.textContent =
+                    `${action.position}. ${LIBELLES_OUTILS[action.outil] || action.outil}`;
+                contenu.appendChild(titre);
+
+                const raison = document.createElement("div");
+                raison.className = "action-raison";
+                raison.textContent = action.raison || "";
+                contenu.appendChild(raison);
+
+                const badges = document.createElement("div");
+                badges.className = "badges";
+                badges.appendChild(creerBadge(
+                    action.reversible ? "annulable" : "IRRÉVERSIBLE",
+                    action.reversible ? "" : "badge-irreversible"
+                ));
+                if (action.origine === "HUMAIN") {
+                    badges.appendChild(creerBadge("ajoutée par vous", ""));
+                }
+                if (action.etat === "BLOQUEE") {
+                    badges.appendChild(creerBadge(
+                        `bloquée : dépend de l'action ${trouverPosition(action.depends_on)}`,
+                        "badge-bloquee"
+                    ));
+                } else if (action.etat === "REFUSEE") {
+                    badges.appendChild(creerBadge("refusée", "badge-bloquee"));
+                } else if (action.etat === "EXECUTEE") {
+                    badges.appendChild(creerBadge("exécutée", "badge-execute"));
+                } else if (action.etat === "ECHOUEE") {
+                    badges.appendChild(creerBadge("échec à l'exécution", "badge-irreversible"));
+                } else if (action.depends_on) {
+                    badges.appendChild(creerBadge(
+                        `dépend de l'action ${trouverPosition(action.depends_on)}`,
+                        ""
+                    ));
+                }
+                contenu.appendChild(badges);
+
+                ligne.append(caseACocher, contenu);
+                listeActions.appendChild(ligne);
+            }
         }
 
-        // La carte bonus "coût affiché" : tokens, coût et latence, visibles
-        // à l'écran, pas seulement dans la réponse réseau.
-        function construireMeta(donnees, latenceMs) {
-            const meta = document.createElement("div");
-            meta.className = "meta";
+        function trouverPosition(actionId) {
+            const trouvee = actionsCourantes.find((a) => a.id === actionId);
+            return trouvee ? trouvee.position : "?";
+        }
 
+        function creerBadge(texte, classeSupplementaire) {
+            const badge = document.createElement("span");
+            badge.className = "badge " + classeSupplementaire;
+            badge.textContent = texte;
+            return badge;
+        }
+
+        // --- Executer les taches cochees ---
+        boutonExecuter.addEventListener("click", async () => {
+            boutonExecuter.disabled = true;
+            messageExecution.innerHTML = "";
+
+            try {
+                const cases = listeActions.querySelectorAll(
+                    'input[type="checkbox"]:not(:disabled)'
+                );
+                for (const uneCase of cases) {
+                    const etat = uneCase.checked ? "APPROUVEE" : "REFUSEE";
+                    const reponse = await fetch(
+                        `/api/actions/${uneCase.dataset.actionId}`,
+                        {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ etat }),
+                        }
+                    );
+                    if (!reponse.ok) {
+                        const erreur = await reponse.json();
+                        throw new Error(erreur.detail || "Erreur d'approbation");
+                    }
+                }
+
+                const executionReponse = await fetch(
+                    `/api/plans/${planCourant}/execute`,
+                    { method: "POST" }
+                );
+                if (!executionReponse.ok) {
+                    const erreur = await executionReponse.json();
+                    throw new Error(erreur.detail || "Erreur d'exécution");
+                }
+
+                // On relit tout depuis la base : c'est la preuve que l'etat
+                // affiche n'est jamais invente cote navigateur.
+                await chargerPlan(planCourant);
+                messageExecution.innerHTML =
+                    '<div class="carte">Exécution terminée. Voir le détail ci-dessus.</div>';
+            } catch (erreur) {
+                messageExecution.innerHTML =
+                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+            } finally {
+                boutonExecuter.disabled = false;
+            }
+        });
+
+        // --- Meta et debug (identiques a l'ecran 1, reutilises ici) ---
+        function rendreMeta(donnees, latenceMs) {
+            meta.replaceChildren();
             const puces = [
-                `plan n°${donnees.plan_id}`,
+                `plan n°${donnees.plan_id || planCourant}`,
                 `${donnees.cout_eur} €`,
                 `${donnees.tokens_entree} + ${donnees.tokens_sortie} tokens`,
-                `${latenceMs} ms`
+                `${latenceMs} ms`,
             ];
             for (const texte of puces) {
-                const puce = document.createElement("span");
-                puce.className = "puce";
-                puce.textContent = texte;
-                meta.appendChild(puce);
+                meta.appendChild(creerBadge(texte, "puce"));
             }
-            return meta;
         }
 
-        // Le panneau debug : la séquence des appels d'outils, déjà là,
-        // sans avoir besoin d'ajouter un print pour la montrer.
-        function construireDebug(trace) {
-            const details = document.createElement("details");
-            details.className = "debug";
-
+        function rendreDebug(trace) {
+            debugPlan.replaceChildren();
             const resume = document.createElement("summary");
             resume.textContent = trace.length
                 ? `Voir les appels d'outils (${trace.length})`
-                : "Aucun outil appelé pour ce plan";
-            details.appendChild(resume);
+                : "Aucun outil appelé pour ce dernier échange";
+            debugPlan.appendChild(resume);
 
             for (const appel of trace) {
                 const bloc = document.createElement("div");
@@ -141,9 +373,8 @@
                     (appel.erreur ? "✗ " : "✓ ") + JSON.stringify(appel.resultat);
 
                 bloc.append(ligne1, args, resultatOutil);
-                details.appendChild(bloc);
+                debugPlan.appendChild(bloc);
             }
-            return details;
         }
     </script>
 </body>
