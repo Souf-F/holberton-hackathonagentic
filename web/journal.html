@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pennyworth — Journal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="avec-resultat">
+    <h1>Journal</h1>
+
+    <div id="journal" class="journal"></div>
+
+    <script>
+        // Tout est relu depuis la base a chaque chargement de la page :
+        // rien de ce qui s'affiche ici ne depend d'une variable JS gardee
+        // en memoire. Un rechargement en plein test doit montrer le meme
+        // journal qu'avant.
+        const conteneur = document.getElementById("journal");
+        const planId = new URLSearchParams(window.location.search).get("plan_id");
+
+        chargerJournal();
+
+        async function chargerJournal() {
+            if (!planId) {
+                conteneur.innerHTML =
+                    `<div class="carte erreur"><pre>Aucun plan_id dans l'URL. ` +
+                    `Exemple : journal.html?plan_id=1</pre></div>`;
+                return;
+            }
+
+            conteneur.innerHTML = `<div class="attente">Chargement du journal
+                <span class="points"><span></span><span></span><span></span></span></div>`;
+
+            try {
+                const reponse = await fetch(`/api/plans/${planId}/audit`);
+                if (!reponse.ok) {
+                    const erreur = await reponse.json();
+                    throw new Error(erreur.detail || "Erreur du serveur");
+                }
+                const donnees = await reponse.json();
+                afficher(donnees.evenements);
+            } catch (erreur) {
+                conteneur.innerHTML =
+                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+            }
+        }
+
+        function afficher(evenements) {
+            const entete = document.createElement("p");
+            entete.className = "exemple visible";
+            entete.textContent = `Plan n°${planId} · ${evenements.length} evenement(s)`;
+
+            if (evenements.length === 0) {
+                const vide = document.createElement("div");
+                vide.className = "carte";
+                vide.innerHTML = "<pre>Aucun evenement pour ce plan.</pre>";
+                conteneur.replaceChildren(entete, vide);
+                return;
+            }
+
+            const liste = document.createElement("div");
+            liste.className = "chrono";
+
+            for (const evenement of evenements) {
+                const ligne = document.createElement("div");
+                ligne.className = "evenement" + (estEchec(evenement.evenement) ? " en-erreur" : "");
+
+                const ligne1 = document.createElement("div");
+                ligne1.className = "ligne1";
+                ligne1.innerHTML =
+                    `<span>${evenement.evenement}</span>` +
+                    `<span class="duree">${evenement.horodatage}</span>`;
+
+                const meta = document.createElement("div");
+                meta.className = "args";
+                const morceaux = [`acteur : ${evenement.acteur}`];
+                if (evenement.action_id) morceaux.push(`action #${evenement.action_id}`);
+                meta.textContent = morceaux.join(" · ");
+
+                ligne.append(ligne1, meta);
+
+                if (evenement.details) {
+                    const details = document.createElement("div");
+                    details.className = "resultat";
+                    details.textContent = evenement.details;
+                    ligne.appendChild(details);
+                }
+
+                liste.appendChild(ligne);
+            }
+
+            conteneur.replaceChildren(entete, liste);
+        }
+
+        function estEchec(evenement) {
+            return evenement === "ACTION_REFUSEE" ||
+                   evenement === "ACTION_BLOQUEE" ||
+                   evenement === "ACTION_ECHOUEE";
+        }
+    </script>
+</body>
+</html>

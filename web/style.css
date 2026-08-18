@@ -358,3 +358,46 @@ button:disabled { opacity: 0.5; cursor: wait; }
     .barre-ajout { flex-direction: column; }
     .barre-ajout button { width: 100%; }
 }
+
+/* --- Ecran du journal : le fil chronologique des evenements audit_log --- */
+.journal {
+    width: 100%;
+    max-width: 36rem;
+}
+
+.chrono {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.evenement {
+    padding: 0.75rem 0.9rem;
+    background: var(--fond-carte);
+    border: 1px solid var(--bordure);
+    border-left: 3px solid var(--accent);
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    animation: apparition 0.3s ease-out;
+}
+
+.evenement.en-erreur { border-left-color: var(--erreur); }
+
+.evenement .ligne1 {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+
+.evenement .duree { font-weight: 400; color: var(--texte-doux); }
+
+.evenement .args,
+.evenement .resultat {
+    margin-top: 0.35rem;
+    color: var(--texte-doux);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}

@@ -65,15 +65,36 @@ def lire_plan(plan_id: int) -> Optional[dict]:
         return dict(ligne) if ligne else None
 
 
-def tracer(plan_id: int, evenement: str, acteur: str, details: str = "") -> None:
+def tracer(
+    plan_id: int, evenement: str, acteur: str, details: str = "",
+    action_id: Optional[int] = None,
+) -> None:
     """Ajoute une ligne au journal. On n'efface jamais, on ajoute."""
     with connexion() as conn:
         conn.execute(
-            """INSERT INTO audit_log (plan_id, evenement, acteur, details, horodatage)
-               VALUES (?, ?, ?, ?, ?)""",
-            (plan_id, evenement, acteur, details,
+            """INSERT INTO audit_log (plan_id, action_id, evenement, acteur, details, horodatage)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (plan_id, action_id, evenement, acteur, details,
              datetime.now().isoformat(timespec="seconds")),
         )
+
+
+def lister_audit(plan_id: int) -> list:
+    """Relit le journal d'un plan, dans l'ordre chronologique."""
+    with connexion() as conn:
+        lignes = conn.execute(
+            "SELECT * FROM audit_log WHERE plan_id = ? ORDER BY id", (plan_id,)
+        ).fetchall()
+        return [dict(ligne) for ligne in lignes]
+
+
+# --- Actions : lues par l'humain (validation) et par l'executeur ---
+
+def lire_action(action_id: int) -> Optional[dict]:
+    """Relit une action par son identifiant. None si elle n'existe pas."""
+    with connexion() as conn:
+        ligne = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+        return dict(ligne) if ligne else None
 
 
 def creer_action(
@@ -107,37 +128,102 @@ def creer_action(
         return curseur.lastrowid
 
 
-def lister_actions(plan_id: int) -> list:
-    """Toutes les actions d'un plan, dans l'ordre d'affichage."""
+def lister_actions_du_plan(plan_id: int) -> list:
+    """Relit les actions d'un plan, dans l'ordre d'affichage (position)."""
     with connexion() as conn:
         lignes = conn.execute(
-            "SELECT * FROM actions WHERE plan_id = ? ORDER BY position",
-            (plan_id,),
+            "SELECT * FROM actions WHERE plan_id = ? ORDER BY position", (plan_id,)
         ).fetchall()
         return [dict(ligne) for ligne in lignes]
 
 
-def lire_action(action_id: int) -> Optional[dict]:
-    """Relit une action par son identifiant. None si elle n'existe pas."""
-    with connexion() as conn:
-        ligne = conn.execute(
-            "SELECT * FROM actions WHERE id = ?", (action_id,)
-        ).fetchone()
-        return dict(ligne) if ligne else None
-
-
-def changer_etat_action(action_id: int, etat: str) -> None:
-    """Fait avancer une action dans sa machine a etats (voir schema.sql)."""
-    with connexion() as conn:
-        conn.execute(
-            "UPDATE actions SET etat = ? WHERE id = ?", (etat, action_id)
-        )
-
-
-def actions_dependantes(action_id: int) -> list:
-    """Les actions qui dependent de celle-ci (depends_on = action_id)."""
+def lister_actions_dependantes(action_id: int) -> list:
+    """Les actions dont `depends_on` pointe vers celle-ci (un seul niveau)."""
     with connexion() as conn:
         lignes = conn.execute(
             "SELECT * FROM actions WHERE depends_on = ?", (action_id,)
         ).fetchall()
         return [dict(ligne) for ligne in lignes]
+
+
+def lister_descendants_en_cascade(action_id: int) -> list:
+    """Toutes les actions qui dependent de action_id, directement ou via
+    une chaine de `depends_on` (enfants, petits-enfants, etc.).
+
+    Parcours en largeur, une action deja vue n'est jamais reparcourue :
+    protege contre un cycle dans les donnees (A depend de B qui depend
+    de A), qui ne devrait jamais arriver mais peut etre insere a la main.
+    Sans cette protection, un tel cycle ferait boucler cette fonction a
+    l'infini.
+
+    Renvoie une liste de (action, parent_id), parent_id etant l'action
+    dont elle depend directement dans ce parcours precis.
+    """
+    vues = {action_id}
+    resultat = []
+    a_traiter = [action_id]
+    while a_traiter:
+        parent_id = a_traiter.pop(0)
+        for enfant in lister_actions_dependantes(parent_id):
+            if enfant["id"] in vues:
+                continue
+            vues.add(enfant["id"])
+            resultat.append((enfant, parent_id))
+            a_traiter.append(enfant["id"])
+    return resultat
+
+
+def maj_etat_action(action_id: int, etat: str) -> None:
+    """Change l'etat d'une action. La contrainte CHECK du schema refuse
+    tout etat qui ne serait pas dans la machine a etats."""
+    with connexion() as conn:
+        conn.execute("UPDATE actions SET etat = ? WHERE id = ?", (etat, action_id))
+
+
+# --- Executions : la preuve, avec la garantie anti-doublon ---
+
+def reserver_execution(action_id: int, cle_idempotence: str) -> Optional[dict]:
+    """Tente de reserver le creneau d'execution pour cette cle.
+
+    On insere une ligne provisoire (statut ECHEC par defaut, corrigee par
+    `finaliser_execution` juste apres) AVANT d'appeler le handler reel :
+    c'est cet INSERT, protege par la contrainte UNIQUE sur
+    executions.cle_idempotence, qui empeche le handler d'etre appele deux
+    fois pour la meme action (double clic, retry, rechargement). On ne
+    verifie jamais "a la main" avant d'inserer : on tente, et on capture
+    l'exception d'unicite si quelqu'un nous a devances.
+
+    Renvoie la ligne inseree si la reservation reussit, None sinon.
+    """
+    with connexion() as conn:
+        try:
+            curseur = conn.execute(
+                """INSERT INTO executions
+                   (action_id, cle_idempotence, statut, resultat, erreur, execute_le)
+                   VALUES (?, ?, 'ECHEC', NULL, 'execution en cours', ?)""",
+                (action_id, cle_idempotence, datetime.now().isoformat(timespec="seconds")),
+            )
+            return {"id": curseur.lastrowid}
+        except sqlite3.IntegrityError:
+            return None
+
+
+def finaliser_execution(
+    execution_id: int, statut: str, resultat: Optional[str], erreur: Optional[str],
+) -> None:
+    """Ecrit le vrai resultat sur la reservation, une fois le handler execute."""
+    with connexion() as conn:
+        conn.execute(
+            "UPDATE executions SET statut = ?, resultat = ?, erreur = ? WHERE id = ?",
+            (statut, resultat, erreur, execution_id),
+        )
+
+
+def lire_execution_par_cle(cle_idempotence: str) -> Optional[dict]:
+    """Relit l'execution existante pour une cle deja prise. Sert au rejeu :
+    on renvoie le resultat memorise au lieu de refaire l'appel reel."""
+    with connexion() as conn:
+        ligne = conn.execute(
+            "SELECT * FROM executions WHERE cle_idempotence = ?", (cle_idempotence,)
+        ).fetchone()
+        return dict(ligne) if ligne else None

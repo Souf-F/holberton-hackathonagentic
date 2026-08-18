@@ -64,8 +64,14 @@ phrases, ou utilise une virgule ou des parentheses a la place.
 Tu ne fais rien toi-meme : tu proposes. Un humain validera chaque action
 avant qu'elle ne soit executee.
 
-Les actions possibles sont : create_employee_record, create_github_issue,
-send_message, generate_file, create_calendar_event."""
+Les actions possibles, avec les arguments EXACTS attendus dans `args`
+(l'executeur qui les recevra plus tard a une signature fixe, respecte
+ces noms de champs a la lettre) :
+- create_github_issue : repo (str), title (str), body (str)
+- send_message : channel (str), text (str)
+- create_employee_record, generate_file, create_calendar_event : pas
+  encore branches cote executeur, evite de les proposer pour l'instant
+  sauf si explicitement demande."""
 
 
 class CleManquante(RuntimeError):
@@ -123,7 +129,7 @@ def _resume_plan_existant(plan_id: int) -> str:
     ferait tout reproposer depuis zero : Claude ne sait pas ce qui existe
     deja s'il ne le revoit pas dans son contexte.
     """
-    actions = db.lister_actions(plan_id)
+    actions = db.lister_actions_du_plan(plan_id)
     if not actions:
         return ""
     lignes = [
@@ -215,7 +221,7 @@ def planifier_stream(intention: str, plan_id: int, origine: str = "AGENT"):
             yield {
                 "type": "fin",
                 "reponse": texte_final,
-                "actions": db.lister_actions(plan_id),
+                "actions": db.lister_actions_du_plan(plan_id),
                 "trace": trace,
                 "tokens_entree": tokens_entree_total,
                 "tokens_sortie": tokens_sortie_total,

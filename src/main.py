@@ -19,6 +19,7 @@ from pydantic import BaseModel
 load_dotenv()  # avant d'importer planner : il lit la cle dans l'environnement
 
 from src import db, planner  # noqa: E402
+from src.executeur import executor  # noqa: E402
 
 DOSSIER_WEB = Path(__file__).parent.parent / "web"
 
@@ -36,6 +37,11 @@ app = FastAPI(title="Pennyworth", lifespan=cycle_de_vie)
 class DemandeIntention(BaseModel):
     """Ce que le front envoie : une phrase, rien d'autre."""
     intention: str
+
+
+class DemandeEtatAction(BaseModel):
+    """Ce que le front envoie pour approuver ou refuser une action."""
+    etat: str
 
 
 def _sse(evenement: dict) -> str:
@@ -125,21 +131,77 @@ def lire_plan(plan_id: int):
     plan = db.lire_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan introuvable.")
-    return {**plan, "actions": db.lister_actions(plan_id)}
+    return {**plan, "actions": db.lister_actions_du_plan(plan_id)}
 
 
-# --- Routes des paliers suivants, cablees d'avance, volontairement vides ---
+ETATS_VALIDABLES = ("APPROUVEE", "REFUSEE")
+
 
 @app.patch("/api/actions/{action_id}")
-def valider_action(action_id: int):
-    """Palier 4 : approuver ou refuser une action."""
-    raise HTTPException(status_code=501, detail="Palier 4.")
+def valider_action(action_id: int, demande: DemandeEtatAction):
+    """Approuve ou refuse une action, geste humain, jamais ecrit par l'agent.
+
+    Un refus bascule automatiquement toute la chaine des actions qui en
+    dependent en BLOQUEE (enfants, petits-enfants, etc.), avec le motif
+    journalise pour chacune.
+    """
+    if demande.etat not in ETATS_VALIDABLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"etat doit etre {' ou '.join(ETATS_VALIDABLES)}.",
+        )
+
+    action = db.lire_action(action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Action introuvable.")
+
+    db.maj_etat_action(action_id, demande.etat)
+    evenement = "ACTION_APPROUVEE" if demande.etat == "APPROUVEE" else "ACTION_REFUSEE"
+    db.tracer(action["plan_id"], evenement, "HUMAIN", action_id=action_id)
+
+    if demande.etat == "REFUSEE":
+        for enfant, parent_id in db.lister_descendants_en_cascade(action_id):
+            db.maj_etat_action(enfant["id"], "BLOQUEE")
+            if parent_id == action_id:
+                motif = f"Bloquee : l'action dont elle depend (#{action_id}) a ete refusee."
+            else:
+                motif = (
+                    f"Bloquee : l'action dont elle depend (#{parent_id}) "
+                    f"a elle-meme ete bloquee (en cascade depuis le refus de #{action_id})."
+                )
+            db.tracer(
+                enfant["plan_id"], "ACTION_BLOQUEE", "HUMAIN", motif,
+                action_id=enfant["id"],
+            )
+
+    return db.lire_action(action_id)
 
 
 @app.post("/api/plans/{plan_id}/execute")
 def executer_plan(plan_id: int):
-    """Palier 4 : executer uniquement les actions approuvees."""
-    raise HTTPException(status_code=501, detail="Palier 4.")
+    """Execute uniquement les actions APPROUVEES du plan, dans l'ordre.
+
+    Ne recoit que l'identifiant du plan : l'executeur relit lui-meme les
+    actions et leur etat en base, il ne les recoit jamais en parametre.
+    """
+    plan = db.lire_plan(plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan introuvable.")
+
+    return {"plan_id": plan_id, "resultats": executor.executer_plan(plan_id)}
+
+
+@app.get("/api/plans/{plan_id}/audit")
+def lire_journal(plan_id: int):
+    """Le journal d'un plan : tout l'audit_log, y compris refus et
+    blocages. Lu depuis la base a chaque appel, pour survivre a un
+    rechargement de page.
+    """
+    plan = db.lire_plan(plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan introuvable.")
+
+    return {"plan_id": plan_id, "evenements": db.lister_audit(plan_id)}
 
 
 @app.post("/api/actions/{action_id}/compensate")

@@ -93,7 +93,7 @@ def construire_gestionnaire(plan_id: int, origine: str = "AGENT"):
     HUMAIN quand l'action vient de la barre d'ajout (meme mecanique, un
     humain peut aussi "proposer" une action qui devra etre approuvee).
     """
-    compteur = {"position": len(db.lister_actions(plan_id))}
+    compteur = {"position": len(db.lister_actions_du_plan(plan_id))}
 
     def executer(tool: str, args: dict, reason: str,
                  depends_on: Optional[int] = None) -> dict:
