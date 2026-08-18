@@ -98,7 +98,13 @@ Liste complete des exclusions : section "Hors scope" de [SPEC.md](./SPEC.md).
 
 ### Commits
 
+<<<<<<< HEAD
 Prefixes par le palier, pour que `git log` raconte la progression : `p2: socle de la table actions`.
+=======
+Convention Conventional Commits : `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`.
+Un scope quand c'est utile, pour que `git log` raconte la progression :
+`feat(executor): idempotence par cle unique`.
+>>>>>>> bbdd74f2f115fc93cc8087253c04996a2ee9f9b4
 
 Avant chaque push : `git pull --rebase origin dev`. Pas de rebase interactif, pas de force push.
 
