@@ -74,3 +74,70 @@ def tracer(plan_id: int, evenement: str, acteur: str, details: str = "") -> None
             (plan_id, evenement, acteur, details,
              datetime.now().isoformat(timespec="seconds")),
         )
+
+
+def creer_action(
+    plan_id: int,
+    position: int,
+    outil: str,
+    arguments: str,
+    raison: str,
+    reversible: bool,
+    depends_on: Optional[int],
+    origine: str,
+    cle_idempotence: str,
+) -> int:
+    """Ecrit une ligne d'action, en etat PROPOSEE. Renvoie son identifiant.
+
+    Appelee par propose_action (l'agent) ou par la barre d'ajout (l'humain).
+    N'execute jamais rien : c'est juste une intention enregistree.
+    """
+    with connexion() as conn:
+        curseur = conn.execute(
+            """INSERT INTO actions
+               (plan_id, position, outil, arguments, raison, reversible,
+                depends_on, origine, etat, cle_idempotence, cree_le)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PROPOSEE', ?, ?)""",
+            (
+                plan_id, position, outil, arguments, raison,
+                1 if reversible else 0, depends_on, origine,
+                cle_idempotence, datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        return curseur.lastrowid
+
+
+def lister_actions(plan_id: int) -> list:
+    """Toutes les actions d'un plan, dans l'ordre d'affichage."""
+    with connexion() as conn:
+        lignes = conn.execute(
+            "SELECT * FROM actions WHERE plan_id = ? ORDER BY position",
+            (plan_id,),
+        ).fetchall()
+        return [dict(ligne) for ligne in lignes]
+
+
+def lire_action(action_id: int) -> Optional[dict]:
+    """Relit une action par son identifiant. None si elle n'existe pas."""
+    with connexion() as conn:
+        ligne = conn.execute(
+            "SELECT * FROM actions WHERE id = ?", (action_id,)
+        ).fetchone()
+        return dict(ligne) if ligne else None
+
+
+def changer_etat_action(action_id: int, etat: str) -> None:
+    """Fait avancer une action dans sa machine a etats (voir schema.sql)."""
+    with connexion() as conn:
+        conn.execute(
+            "UPDATE actions SET etat = ? WHERE id = ?", (etat, action_id)
+        )
+
+
+def actions_dependantes(action_id: int) -> list:
+    """Les actions qui dependent de celle-ci (depends_on = action_id)."""
+    with connexion() as conn:
+        lignes = conn.execute(
+            "SELECT * FROM actions WHERE depends_on = ?", (action_id,)
+        ).fetchall()
+        return [dict(ligne) for ligne in lignes]

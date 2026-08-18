@@ -36,17 +36,14 @@ class DemandeIntention(BaseModel):
     intention: str
 
 
-@app.post("/api/plans")
-def creer_plan(demande: DemandeIntention):
-    """Recoit une intention, demande une proposition a Claude, la range en base."""
-    if not demande.intention.strip():
-        raise HTTPException(status_code=400, detail="L'intention est vide.")
+def _planifier_et_repondre(intention: str, plan_id: int, origine: str) -> dict:
+    """Appelle le planificateur et traduit ses erreurs en reponses HTTP.
 
-    plan_id = db.creer_plan(demande.intention)
-    db.tracer(plan_id, "PLAN_CREE", "HUMAIN", demande.intention)
-
+    Partagee par la creation de plan et la barre d'ajout : les deux
+    relancent la meme boucle, seule l'origine de l'appel change.
+    """
     try:
-        resultat = planner.planifier(demande.intention)
+        resultat = planner.planifier(intention, plan_id, origine=origine)
     except planner.CleManquante as manque:
         raise HTTPException(status_code=503, detail=str(manque))
     except planner.BoucleTropLongue as trop_long:
@@ -62,17 +59,52 @@ def creer_plan(demande: DemandeIntention):
 
     db.enregistrer_reponse(plan_id, resultat["reponse"], resultat)
     db.tracer(plan_id, "PLAN_PROPOSE", "AGENT")
+    return resultat
 
+
+@app.post("/api/plans")
+def creer_plan(demande: DemandeIntention):
+    """Recoit une intention, demande une proposition a Claude, la range en base."""
+    if not demande.intention.strip():
+        raise HTTPException(status_code=400, detail="L'intention est vide.")
+
+    plan_id = db.creer_plan(demande.intention)
+    db.tracer(plan_id, "PLAN_CREE", "HUMAIN", demande.intention)
+
+    resultat = _planifier_et_repondre(demande.intention, plan_id, "AGENT")
+    return {"plan_id": plan_id, **resultat}
+
+
+@app.post("/api/plans/{plan_id}/ajouter")
+def ajouter_au_plan(plan_id: int, demande: DemandeIntention):
+    """La barre d'ajout : relance le MEME planificateur sur un plan existant.
+
+    L'action ajoutee arrive en PROPOSEE comme les autres, jamais
+    auto-approuvee sous pretexte qu'elle vient d'une demande humaine
+    explicite : ce serait la premiere exception au principe de
+    validation, celle que notre hors scope refuse.
+    """
+    if db.lire_plan(plan_id) is None:
+        raise HTTPException(status_code=404, detail="Plan introuvable.")
+    if not demande.intention.strip():
+        raise HTTPException(status_code=400, detail="L'intention est vide.")
+
+    resultat = _planifier_et_repondre(demande.intention, plan_id, "HUMAIN")
     return {"plan_id": plan_id, **resultat}
 
 
 @app.get("/api/plans/{plan_id}")
 def lire_plan(plan_id: int):
-    """Relit un plan deja produit."""
+    """Relit un plan deja produit, avec ses actions.
+
+    C'est cette route qui rend la persistance possible : le front garde
+    le plan_id dans son URL, et au chargement de la page, rappelle cette
+    route pour retrouver l'etat exact la ou on l'avait laisse.
+    """
     plan = db.lire_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan introuvable.")
-    return plan
+    return {**plan, "actions": db.lister_actions(plan_id)}
 
 
 # --- Routes des paliers suivants, cablees d'avance, volontairement vides ---
