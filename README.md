@@ -12,6 +12,12 @@ Binome : [Adam](https://github.com/Adamzou-lab) et [Souf](https://github.com/Sou
 
 **Etat : palier 2 (socle). Le tuyau est ouvert : une intention entre, Claude repond, ca s'affiche.**
 
+**En ligne : https://pennyworth.adamzou.fr**
+
+> Heberge sur Render, plan gratuit. Le service se met en veille apres 15 minutes
+> sans visite : la premiere requete peut prendre 30 a 50 secondes, le temps du
+> reveil. Les suivantes sont immediates.
+
 ---
 
 ## Quickstart
