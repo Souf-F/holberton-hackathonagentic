@@ -1,0 +1,38 @@
+[
+  {
+    "nom": "Julie Martin",
+    "poste": "Developpeuse backend",
+    "equipe": "Plateforme",
+    "manager": "Karim Haddad"
+  },
+  {
+    "nom": "Karim Haddad",
+    "poste": "Tech lead",
+    "equipe": "Plateforme",
+    "manager": "Nadia Ferrand"
+  },
+  {
+    "nom": "Sarah Dubois",
+    "poste": "Designer produit",
+    "equipe": "Design",
+    "manager": "Nadia Ferrand"
+  },
+  {
+    "nom": "Thomas Lefevre",
+    "poste": "Developpeur frontend",
+    "equipe": "Plateforme",
+    "manager": "Karim Haddad"
+  },
+  {
+    "nom": "Nadia Ferrand",
+    "poste": "Directrice technique",
+    "equipe": "Direction",
+    "manager": null
+  },
+  {
+    "nom": "Lina Bensaid",
+    "poste": "Alternante data",
+    "equipe": "Data",
+    "manager": "Nadia Ferrand"
+  }
+]

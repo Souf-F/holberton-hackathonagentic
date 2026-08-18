@@ -31,8 +31,14 @@
             evenement.preventDefault();
 
             bouton.disabled = true;
-            resultat.innerHTML = "<pre>Pennyworth réfléchit...</pre>";
             document.body.classList.add("avec-resultat");
+            resultat.innerHTML = `
+                <div class="attente">
+                    Pennyworth réfléchit
+                    <span class="points"><span></span><span></span><span></span></span>
+                </div>`;
+
+            const debut = performance.now();
 
             try {
                 // Le navigateur parle uniquement à notre serveur.
@@ -43,33 +49,92 @@
                     body: JSON.stringify({ intention: champ.value })
                 });
 
+                const latenceMs = Math.round(performance.now() - debut);
+
                 if (!reponse.ok) {
                     const erreur = await reponse.json();
                     throw new Error(erreur.detail || "Erreur du serveur");
                 }
 
                 const donnees = await reponse.json();
-                afficher(donnees);
+                afficher(donnees, latenceMs);
             } catch (erreur) {
                 resultat.innerHTML =
-                    `<pre class="erreur">${erreur.message}</pre>`;
+                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
             } finally {
                 bouton.disabled = false;
             }
         });
 
-        function afficher(donnees) {
+        function afficher(donnees, latenceMs) {
+            const carte = document.createElement("div");
+            carte.className = "carte";
             const texte = document.createElement("pre");
             texte.textContent = donnees.reponse;
+            carte.appendChild(texte);
 
-            const meta = document.createElement("p");
+            const meta = construireMeta(donnees, latenceMs);
+            const debug = construireDebug(donnees.trace || []);
+
+            resultat.replaceChildren(carte, meta, debug);
+        }
+
+        // La carte bonus "coût affiché" : tokens, coût et latence, visibles
+        // à l'écran, pas seulement dans la réponse réseau.
+        function construireMeta(donnees, latenceMs) {
+            const meta = document.createElement("div");
             meta.className = "meta";
-            meta.textContent =
-                `plan n°${donnees.plan_id} · ${donnees.cout_eur} € · ` +
-                `${donnees.tokens_entree} + ${donnees.tokens_sortie} tokens`;
 
-            resultat.replaceChildren(texte, meta);
-            document.body.classList.add("avec-resultat");
+            const puces = [
+                `plan n°${donnees.plan_id}`,
+                `${donnees.cout_eur} €`,
+                `${donnees.tokens_entree} + ${donnees.tokens_sortie} tokens`,
+                `${latenceMs} ms`
+            ];
+            for (const texte of puces) {
+                const puce = document.createElement("span");
+                puce.className = "puce";
+                puce.textContent = texte;
+                meta.appendChild(puce);
+            }
+            return meta;
+        }
+
+        // Le panneau debug : la séquence des appels d'outils, déjà là,
+        // sans avoir besoin d'ajouter un print pour la montrer.
+        function construireDebug(trace) {
+            const details = document.createElement("details");
+            details.className = "debug";
+
+            const resume = document.createElement("summary");
+            resume.textContent = trace.length
+                ? `Voir les appels d'outils (${trace.length})`
+                : "Aucun outil appelé pour ce plan";
+            details.appendChild(resume);
+
+            for (const appel of trace) {
+                const bloc = document.createElement("div");
+                bloc.className = "appel-outil" + (appel.erreur ? " en-erreur" : "");
+
+                const ligne1 = document.createElement("div");
+                ligne1.className = "ligne1";
+                ligne1.innerHTML =
+                    `<span>${appel.outil}</span>` +
+                    `<span class="duree">${appel.duree_ms} ms</span>`;
+
+                const args = document.createElement("div");
+                args.className = "args";
+                args.textContent = "→ " + JSON.stringify(appel.arguments);
+
+                const resultatOutil = document.createElement("div");
+                resultatOutil.className = "resultat";
+                resultatOutil.textContent =
+                    (appel.erreur ? "✗ " : "✓ ") + JSON.stringify(appel.resultat);
+
+                bloc.append(ligne1, args, resultatOutil);
+                details.appendChild(bloc);
+            }
+            return details;
         }
     </script>
 </body>
