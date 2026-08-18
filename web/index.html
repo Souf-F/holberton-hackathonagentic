@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Pennyworth</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -15,7 +18,7 @@
         <button id="envoyer" type="submit">Demander</button>
     </form>
 
-    <p class="exemple">
+    <p class="exemple" id="exemple">
         Exemple : prépare l'arrivée de Jean, stagiaire dev, lundi
     </p>
 
@@ -26,6 +29,12 @@
         const champ = document.getElementById("intention");
         const bouton = document.getElementById("envoyer");
         const resultat = document.getElementById("resultat");
+        const exemple = document.getElementById("exemple");
+
+        // L'exemple ne s'affiche que pendant qu'on ecrit, pour ne pas
+        // encombrer l'ecran une fois qu'on sait deja quoi taper.
+        champ.addEventListener("focus", () => exemple.classList.add("visible"));
+        champ.addEventListener("blur", () => exemple.classList.remove("visible"));
 
         formulaire.addEventListener("submit", async (evenement) => {
             evenement.preventDefault();
