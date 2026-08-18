@@ -111,62 +111,160 @@
             const donnees = await reponse.json();
             planCourant = planId;
             actionsCourantes = donnees.actions || [];
-            afficherEcranPlan(donnees.intention, donnees.reponse || "");
+            afficherEcranPlan(donnees.intention);
+            if (donnees.reponse) {
+                // Contrairement au streaming (qui remplit reponseAgent au
+                // fil du texte recu), ici on relit une reponse deja
+                // complete depuis la base : pas besoin de la faire defiler.
+                const carte = document.createElement("div");
+                carte.className = "carte";
+                const pre = document.createElement("pre");
+                pre.textContent = donnees.reponse;
+                carte.appendChild(pre);
+                reponseAgent.replaceChildren(carte);
+            }
             rendreActions();
         }
 
-        function afficherEcranPlan(intention, reponseTexte) {
+        function afficherEcranPlan(intention) {
             ecranIntention.hidden = true;
             ecranPlan.hidden = false;
             intentionAffichee.textContent = `« ${intention} »`;
-            if (reponseTexte) {
-                reponseAgent.innerHTML =
-                    `<div class="carte"><pre>${echapper(reponseTexte)}</pre></div>`;
+        }
+
+        // --- Lecture d'un flux SSE : decoupe en evenements JSON un par un.
+        // Carte bonus "streaming" : chaque evenement est traite des qu'il
+        // arrive, pas apres que la reponse complete soit terminee.
+        async function* lireFluxSSE(reponse) {
+            const lecteur = reponse.body.getReader();
+            const decodeur = new TextDecoder();
+            let tampon = "";
+
+            while (true) {
+                const { done, value } = await lecteur.read();
+                if (done) break;
+                tampon += decodeur.decode(value, { stream: true });
+
+                let indexSeparateur;
+                while ((indexSeparateur = tampon.indexOf("\n\n")) !== -1) {
+                    const bloc = tampon.slice(0, indexSeparateur);
+                    tampon = tampon.slice(indexSeparateur + 2);
+                    if (bloc.startsWith("data: ")) {
+                        yield JSON.parse(bloc.slice("data: ".length));
+                    }
+                }
             }
         }
 
-        function echapper(texte) {
-            const div = document.createElement("div");
-            div.textContent = texte;
-            return div.innerHTML;
+        // --- Envoie une intention et traite le flux au fil de l'eau.
+        // Partagee par l'ecran 1 (creation) et la barre d'ajout : seule
+        // l'URL et ce qui se passe sur l'evenement "debut" changent.
+        async function envoyerEtStreamer(url, intentionTexte) {
+            const debut = performance.now();
+            const reponse = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ intention: intentionTexte }),
+            });
+
+            if (!reponse.ok) {
+                // Erreur avant meme l'ouverture du flux (ex. intention vide).
+                const erreur = await reponse.json();
+                throw new Error(erreur.detail || "Erreur du serveur");
+            }
+
+            // Le panneau debug repart de zero a chaque echange : il montre
+            // la trace du dernier appel, pas un historique cumule. Meme
+            // chose pour la reponse en texte : si ce nouvel echange n'en
+            // produit pas (que des outils), l'ancienne ne doit pas rester
+            // affichee comme si elle etait encore d'actualite.
+            debugPlan.querySelectorAll(".appel-outil").forEach((n) => n.remove());
+            reponseAgent.replaceChildren();
+
+            // Le texte de cet echange s'affiche dans sa propre carte, creee
+            // au premier morceau recu, remplie ensuite au fil de l'eau.
+            let carteReponse = null;
+            let dernierAppelEnCours = null;
+            let derniereDonneesFin = null;
+
+            for await (const evenement of lireFluxSSE(reponse)) {
+                switch (evenement.type) {
+                    case "debut":
+                        planCourant = evenement.plan_id;
+                        history.pushState(null, "", `?plan=${planCourant}`);
+                        afficherEcranPlan(intentionTexte);
+                        listeActions.replaceChildren();
+                        actionsCourantes = [];
+                        break;
+
+                    case "texte_delta":
+                        if (!carteReponse) {
+                            carteReponse = document.createElement("pre");
+                            reponseAgent.replaceChildren(
+                                Object.assign(document.createElement("div"), {
+                                    className: "carte",
+                                })
+                            );
+                            reponseAgent.firstChild.appendChild(carteReponse);
+                        }
+                        carteReponse.textContent += evenement.texte;
+                        break;
+
+                    case "outil_appel":
+                        dernierAppelEnCours = ajouterLigneDebug(
+                            evenement.outil, evenement.arguments, null
+                        );
+                        break;
+
+                    case "outil_resultat":
+                        if (dernierAppelEnCours) {
+                            remplirLigneDebug(dernierAppelEnCours, evenement);
+                            dernierAppelEnCours = null;
+                        }
+                        break;
+
+                    case "action_proposee":
+                        // Une ligne apparait des qu'elle existe, sans
+                        // attendre que Claude ait fini tout le plan.
+                        actionsCourantes.push(evenement.action);
+                        ajouterActionAffichee(evenement.action);
+                        break;
+
+                    case "fin":
+                        derniereDonneesFin = evenement;
+                        break;
+
+                    case "erreur":
+                        throw new Error(evenement.message);
+                }
+            }
+
+            const latenceMs = Math.round(performance.now() - debut);
+            if (derniereDonneesFin) {
+                // Recapitulatif final : on realigne sur ce que le serveur
+                // considere definitif, plutot que de faire confiance aux
+                // seuls evenements deja recus cote navigateur.
+                actionsCourantes = derniereDonneesFin.actions;
+                rendreActions();
+                rendreMeta(derniereDonneesFin, latenceMs);
+                debugPlan.querySelector("summary").textContent =
+                    derniereDonneesFin.trace.length
+                        ? `Voir les appels d'outils (${derniereDonneesFin.trace.length})`
+                        : "Aucun outil appelé";
+            }
         }
 
         // --- Ecran 1 : creation d'un nouveau plan ---
         formulaire.addEventListener("submit", async (evenement) => {
             evenement.preventDefault();
             bouton.disabled = true;
-
-            const debut = performance.now();
             try {
-                const reponse = await fetch("/api/plans", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ intention: champ.value }),
-                });
-                const latenceMs = Math.round(performance.now() - debut);
-
-                if (!reponse.ok) {
-                    const erreur = await reponse.json();
-                    throw new Error(erreur.detail || "Erreur du serveur");
-                }
-
-                const donnees = await reponse.json();
-                planCourant = donnees.plan_id;
-                actionsCourantes = donnees.actions || [];
-
-                // Le plan_id entre dans l'URL : c'est ce qui permet de
-                // recharger la page sans rien perdre.
-                history.pushState(null, "", `?plan=${planCourant}`);
-
-                afficherEcranPlan(champ.value, donnees.reponse);
-                rendreActions();
-                rendreMeta(donnees, latenceMs);
-                rendreDebug(donnees.trace || []);
+                await envoyerEtStreamer("/api/plans", champ.value);
             } catch (erreur) {
-                reponseAgent.innerHTML =
-                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
                 ecranIntention.hidden = true;
                 ecranPlan.hidden = false;
+                reponseAgent.innerHTML =
+                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
             } finally {
                 bouton.disabled = false;
             }
@@ -177,28 +275,10 @@
             evenement.preventDefault();
             if (!ajoutChamp.value.trim()) return;
             ajoutBouton.disabled = true;
-
-            const debut = performance.now();
+            const texte = ajoutChamp.value;
+            ajoutChamp.value = "";
             try {
-                const reponse = await fetch(`/api/plans/${planCourant}/ajouter`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ intention: ajoutChamp.value }),
-                });
-                const latenceMs = Math.round(performance.now() - debut);
-
-                if (!reponse.ok) {
-                    const erreur = await reponse.json();
-                    throw new Error(erreur.detail || "Erreur du serveur");
-                }
-
-                const donnees = await reponse.json();
-                actionsCourantes = donnees.actions || [];
-                ajoutChamp.value = "";
-
-                rendreActions();
-                rendreMeta(donnees, latenceMs);
-                rendreDebug(donnees.trace || []);
+                await envoyerEtStreamer(`/api/plans/${planCourant}/ajouter`, texte);
             } catch (erreur) {
                 messageExecution.innerHTML =
                     `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
@@ -208,68 +288,82 @@
         });
 
         // --- La liste des actions, cochables ---
+
+        // Reconstruit tout depuis actionsCourantes : utilise au chargement
+        // d'un plan existant, et pour le recapitulatif final du streaming.
         function rendreActions() {
             listeActions.replaceChildren();
-
             for (const action of actionsCourantes) {
-                const ligne = document.createElement("div");
-                ligne.className = "action etat-" + action.etat.toLowerCase();
-
-                const caseACocher = document.createElement("input");
-                caseACocher.type = "checkbox";
-                caseACocher.dataset.actionId = action.id;
-                // Decochee par defaut : le choix le plus important de
-                // l'ecran. Si l'action a deja un etat definitif, la case
-                // reflete cet etat et devient non modifiable.
-                const decisionsPrises = ["APPROUVEE", "EXECUTEE", "ECHOUEE", "COMPENSEE"];
-                caseACocher.checked = decisionsPrises.includes(action.etat);
-                caseACocher.disabled = action.etat !== "PROPOSEE";
-
-                const contenu = document.createElement("div");
-                contenu.className = "action-contenu";
-
-                const titre = document.createElement("div");
-                titre.className = "action-titre";
-                titre.textContent =
-                    `${action.position}. ${LIBELLES_OUTILS[action.outil] || action.outil}`;
-                contenu.appendChild(titre);
-
-                const raison = document.createElement("div");
-                raison.className = "action-raison";
-                raison.textContent = action.raison || "";
-                contenu.appendChild(raison);
-
-                const badges = document.createElement("div");
-                badges.className = "badges";
-                badges.appendChild(creerBadge(
-                    action.reversible ? "annulable" : "IRRÉVERSIBLE",
-                    action.reversible ? "" : "badge-irreversible"
-                ));
-                if (action.origine === "HUMAIN") {
-                    badges.appendChild(creerBadge("ajoutée par vous", ""));
-                }
-                if (action.etat === "BLOQUEE") {
-                    badges.appendChild(creerBadge(
-                        `bloquée : dépend de l'action ${trouverPosition(action.depends_on)}`,
-                        "badge-bloquee"
-                    ));
-                } else if (action.etat === "REFUSEE") {
-                    badges.appendChild(creerBadge("refusée", "badge-bloquee"));
-                } else if (action.etat === "EXECUTEE") {
-                    badges.appendChild(creerBadge("exécutée", "badge-execute"));
-                } else if (action.etat === "ECHOUEE") {
-                    badges.appendChild(creerBadge("échec à l'exécution", "badge-irreversible"));
-                } else if (action.depends_on) {
-                    badges.appendChild(creerBadge(
-                        `dépend de l'action ${trouverPosition(action.depends_on)}`,
-                        ""
-                    ));
-                }
-                contenu.appendChild(badges);
-
-                ligne.append(caseACocher, contenu);
-                listeActions.appendChild(ligne);
+                listeActions.appendChild(construireLigneAction(action));
             }
+        }
+
+        // Ajoute UNE action a la suite des autres, sans redessiner le
+        // reste. C'est cette fonction que le streaming appelle a chaque
+        // evenement action_proposee : les lignes apparaissent une par une,
+        // pendant que Claude continue a reflechir sur la suite du plan.
+        function ajouterActionAffichee(action) {
+            listeActions.appendChild(construireLigneAction(action));
+        }
+
+        function construireLigneAction(action) {
+            const ligne = document.createElement("div");
+            ligne.className = "action etat-" + action.etat.toLowerCase();
+
+            const caseACocher = document.createElement("input");
+            caseACocher.type = "checkbox";
+            caseACocher.dataset.actionId = action.id;
+            // Decochee par defaut : le choix le plus important de l'ecran.
+            // Si l'action a deja un etat definitif, la case reflete cet
+            // etat et devient non modifiable.
+            const decisionsPrises = ["APPROUVEE", "EXECUTEE", "ECHOUEE", "COMPENSEE"];
+            caseACocher.checked = decisionsPrises.includes(action.etat);
+            caseACocher.disabled = action.etat !== "PROPOSEE";
+
+            const contenu = document.createElement("div");
+            contenu.className = "action-contenu";
+
+            const titre = document.createElement("div");
+            titre.className = "action-titre";
+            titre.textContent =
+                `${action.position}. ${LIBELLES_OUTILS[action.outil] || action.outil}`;
+            contenu.appendChild(titre);
+
+            const raison = document.createElement("div");
+            raison.className = "action-raison";
+            raison.textContent = action.raison || "";
+            contenu.appendChild(raison);
+
+            const badges = document.createElement("div");
+            badges.className = "badges";
+            badges.appendChild(creerBadge(
+                action.reversible ? "annulable" : "IRRÉVERSIBLE",
+                action.reversible ? "" : "badge-irreversible"
+            ));
+            if (action.origine === "HUMAIN") {
+                badges.appendChild(creerBadge("ajoutée par vous", ""));
+            }
+            if (action.etat === "BLOQUEE") {
+                badges.appendChild(creerBadge(
+                    `bloquée : dépend de l'action ${trouverPosition(action.depends_on)}`,
+                    "badge-bloquee"
+                ));
+            } else if (action.etat === "REFUSEE") {
+                badges.appendChild(creerBadge("refusée", "badge-bloquee"));
+            } else if (action.etat === "EXECUTEE") {
+                badges.appendChild(creerBadge("exécutée", "badge-execute"));
+            } else if (action.etat === "ECHOUEE") {
+                badges.appendChild(creerBadge("échec à l'exécution", "badge-irreversible"));
+            } else if (action.depends_on) {
+                badges.appendChild(creerBadge(
+                    `dépend de l'action ${trouverPosition(action.depends_on)}`,
+                    ""
+                ));
+            }
+            contenu.appendChild(badges);
+
+            ligne.append(caseACocher, contenu);
+            return ligne;
         }
 
         function trouverPosition(actionId) {
@@ -282,6 +376,40 @@
             badge.className = "badge " + classeSupplementaire;
             badge.textContent = texte;
             return badge;
+        }
+
+        // --- Le panneau debug, rempli en direct pendant le streaming ---
+
+        // Cree une ligne "en cours" des que l'outil est demande, avant
+        // meme qu'on connaisse son resultat ou sa duree.
+        function ajouterLigneDebug(outil, args, resultat) {
+            const bloc = document.createElement("div");
+            bloc.className = "appel-outil";
+
+            const ligne1 = document.createElement("div");
+            ligne1.className = "ligne1";
+            ligne1.innerHTML = `<span>${outil}</span><span class="duree">…</span>`;
+
+            const argsDiv = document.createElement("div");
+            argsDiv.className = "args";
+            argsDiv.textContent = "→ " + JSON.stringify(args);
+
+            const resultatDiv = document.createElement("div");
+            resultatDiv.className = "resultat";
+            resultatDiv.textContent = "en cours…";
+
+            bloc.append(ligne1, argsDiv, resultatDiv);
+            debugPlan.appendChild(bloc);
+            return bloc;
+        }
+
+        // Complete la ligne "en cours" une fois le resultat arrive.
+        function remplirLigneDebug(bloc, evenementResultat) {
+            if (evenementResultat.erreur) bloc.classList.add("en-erreur");
+            bloc.querySelector(".duree").textContent = `${evenementResultat.duree_ms} ms`;
+            bloc.querySelector(".resultat").textContent =
+                (evenementResultat.erreur ? "✗ " : "✓ ") +
+                JSON.stringify(evenementResultat.resultat);
         }
 
         // --- Executer les taches cochees ---
@@ -345,37 +473,6 @@
             }
         }
 
-        function rendreDebug(trace) {
-            debugPlan.replaceChildren();
-            const resume = document.createElement("summary");
-            resume.textContent = trace.length
-                ? `Voir les appels d'outils (${trace.length})`
-                : "Aucun outil appelé pour ce dernier échange";
-            debugPlan.appendChild(resume);
-
-            for (const appel of trace) {
-                const bloc = document.createElement("div");
-                bloc.className = "appel-outil" + (appel.erreur ? " en-erreur" : "");
-
-                const ligne1 = document.createElement("div");
-                ligne1.className = "ligne1";
-                ligne1.innerHTML =
-                    `<span>${appel.outil}</span>` +
-                    `<span class="duree">${appel.duree_ms} ms</span>`;
-
-                const args = document.createElement("div");
-                args.className = "args";
-                args.textContent = "→ " + JSON.stringify(appel.arguments);
-
-                const resultatOutil = document.createElement("div");
-                resultatOutil.className = "resultat";
-                resultatOutil.textContent =
-                    (appel.erreur ? "✗ " : "✓ ") + JSON.stringify(appel.resultat);
-
-                bloc.append(ligne1, args, resultatOutil);
-                debugPlan.appendChild(bloc);
-            }
-        }
     </script>
 </body>
 </html>

@@ -5,12 +5,14 @@ Une fois ce fichier ecrit, plus personne n'y touche : c'est le fichier le plus
 chaud du projet, et le geler evite les conflits git entre nous deux.
 """
 
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
 from anthropic import AuthenticationError
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -36,43 +38,60 @@ class DemandeIntention(BaseModel):
     intention: str
 
 
-def _planifier_et_repondre(intention: str, plan_id: int, origine: str) -> dict:
-    """Appelle le planificateur et traduit ses erreurs en reponses HTTP.
+def _sse(evenement: dict) -> str:
+    """Encode un evenement au format attendu par EventSource / fetch+SSE."""
+    return f"data: {json.dumps(evenement, ensure_ascii=False)}\n\n"
 
-    Partagee par la creation de plan et la barre d'ajout : les deux
-    relancent la meme boucle, seule l'origine de l'appel change.
+
+def _flux(intention: str, plan_id: int, origine: str):
+    """Relaie planifier_stream() en evenements SSE.
+
+    Carte bonus "streaming". Un generateur, pas une fonction async : FastAPI
+    l'execute tout seul dans un thread a part, exactement comme pour les
+    routes synchrones existantes, donc aucun autre fichier n'a besoin de
+    changer de style pour ca.
+
+    Les erreurs qui se produisaient avant sous forme de HTTPException ne
+    peuvent plus l'etre une fois le flux ouvert : les entetes HTTP (200,
+    text/event-stream) sont deja envoyes des le premier evenement. On les
+    transforme donc en evenement `erreur`, que le front affiche dans sa
+    carte d'erreur habituelle plutot que de lire le code HTTP.
     """
     try:
-        resultat = planner.planifier(intention, plan_id, origine=origine)
+        for evenement in planner.planifier_stream(intention, plan_id, origine):
+            if evenement["type"] == "fin":
+                db.enregistrer_reponse(plan_id, evenement["reponse"], evenement)
+                db.tracer(plan_id, "PLAN_PROPOSE", "AGENT")
+            yield _sse(evenement)
     except planner.CleManquante as manque:
-        raise HTTPException(status_code=503, detail=str(manque))
-    except planner.BoucleTropLongue as trop_long:
-        raise HTTPException(status_code=504, detail=str(trop_long))
+        yield _sse({"type": "erreur", "message": str(manque)})
     except AuthenticationError:
         # La cle est presente mais Claude la refuse : revoquee, mal copiee,
         # ou pas encore mise a jour sur l'hebergeur apres une rotation.
-        raise HTTPException(
-            status_code=503,
-            detail="La cle API est refusee par Anthropic. Verifiez qu'elle "
-                   "est valide et a jour, en local (.env) comme en production.",
-        )
-
-    db.enregistrer_reponse(plan_id, resultat["reponse"], resultat)
-    db.tracer(plan_id, "PLAN_PROPOSE", "AGENT")
-    return resultat
+        yield _sse({
+            "type": "erreur",
+            "message": "La cle API est refusee par Anthropic. Verifiez "
+                       "qu'elle est valide et a jour, en local (.env) "
+                       "comme en production.",
+        })
 
 
 @app.post("/api/plans")
 def creer_plan(demande: DemandeIntention):
-    """Recoit une intention, demande une proposition a Claude, la range en base."""
+    """Recoit une intention, cree le plan, stream la proposition de Claude."""
     if not demande.intention.strip():
         raise HTTPException(status_code=400, detail="L'intention est vide.")
 
     plan_id = db.creer_plan(demande.intention)
     db.tracer(plan_id, "PLAN_CREE", "HUMAIN", demande.intention)
 
-    resultat = _planifier_et_repondre(demande.intention, plan_id, "AGENT")
-    return {"plan_id": plan_id, **resultat}
+    def flux_avec_debut():
+        # Le front a besoin du plan_id des la premiere milliseconde, pour
+        # mettre a jour l'URL avant meme que Claude ait commence a repondre.
+        yield _sse({"type": "debut", "plan_id": plan_id})
+        yield from _flux(demande.intention, plan_id, "AGENT")
+
+    return StreamingResponse(flux_avec_debut(), media_type="text/event-stream")
 
 
 @app.post("/api/plans/{plan_id}/ajouter")
@@ -89,8 +108,10 @@ def ajouter_au_plan(plan_id: int, demande: DemandeIntention):
     if not demande.intention.strip():
         raise HTTPException(status_code=400, detail="L'intention est vide.")
 
-    resultat = _planifier_et_repondre(demande.intention, plan_id, "HUMAIN")
-    return {"plan_id": plan_id, **resultat}
+    return StreamingResponse(
+        _flux(demande.intention, plan_id, "HUMAIN"),
+        media_type="text/event-stream",
+    )
 
 
 @app.get("/api/plans/{plan_id}")

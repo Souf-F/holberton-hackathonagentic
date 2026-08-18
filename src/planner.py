@@ -72,10 +72,6 @@ class CleManquante(RuntimeError):
     """Levee quand aucune cle API n'est configuree."""
 
 
-class BoucleTropLongue(RuntimeError):
-    """Levee quand la boucle depasse MAX_TOURS sans que Claude conclue."""
-
-
 def _client() -> Anthropic:
     """Le client lit ANTHROPIC_API_KEY dans l'environnement.
 
@@ -139,20 +135,26 @@ def _resume_plan_existant(plan_id: int) -> str:
     )
 
 
-def planifier(intention: str, plan_id: int, origine: str = "AGENT") -> dict:
-    """Fait dialoguer Claude avec ses outils jusqu'a une reponse finale.
+def planifier_stream(intention: str, plan_id: int, origine: str = "AGENT"):
+    """Fait dialoguer Claude avec ses outils, en emettant chaque etape.
 
-    C'est le point de rencontre entre les deux moities du projet : la
-    route de main.py appelle cette fonction, et rien d'autre.
+    Carte bonus "streaming" du palier 4. Plutot que d'attendre la fin de
+    la boucle (parfois 40 secondes, plusieurs tours) pour tout renvoyer
+    d'un bloc, cette fonction est un generateur : chaque `yield` est un
+    evenement que main.py relaie tout de suite au navigateur en SSE.
+
+    Types d'evenements emis, dans cet ordre possible :
+      - texte_delta      : un morceau de la reponse en texte de Claude
+      - outil_appel      : un outil vient d'etre demande (avant execution)
+      - outil_resultat   : le resultat de cet appel (apres execution)
+      - action_proposee  : une ligne d'action vient d'etre ecrite en base
+      - fin              : tout est termine, recapitulatif complet
+      - erreur           : la boucle n'a pas pu conclure
 
     `plan_id` est necessaire des le debut : propose_action doit savoir
     dans quel plan ecrire chaque action. `origine` vaut AGENT pour une
     creation de plan, HUMAIN pour la barre d'ajout (meme mecanique,
     l'action ajoutee arrive quand meme en PROPOSEE, jamais auto-approuvee).
-
-    A chaque tour : on envoie la conversation a Claude. S'il demande un
-    outil, on l'execute et on lui renvoie le resultat, puis on reboucle.
-    S'il ne demande rien, sa reponse est finale.
     """
     client = _client()
     schemas = outils.SCHEMAS + [proposer.SCHEMA]
@@ -169,17 +171,29 @@ def planifier(intention: str, plan_id: int, origine: str = "AGENT") -> dict:
     contexte = _resume_plan_existant(plan_id)
     messages = [{"role": "user", "content": f"{aujourdhui}\n\n{contexte}{intention}"}]
     trace = []
+    texte_final = ""
     tokens_entree_total = 0
     tokens_sortie_total = 0
 
     for _ in range(MAX_TOURS):
-        reponse = client.messages.create(
+        # client.messages.stream() donne acces aux evenements bruts de
+        # l'API au fur et a mesure qu'ils arrivent. On relaie les
+        # morceaux de texte des qu'ils sont recus (vrai streaming, pas
+        # simule), et on recupere le message complet a la fin du tour
+        # pour les tool_use : leur JSON arrive fragmente sur plusieurs
+        # evenements, et le SDK sait deja le reassembler correctement.
+        with client.messages.stream(
             model=MODELE,
             max_tokens=16000,
             system=PROMPT_SYSTEME,
             tools=schemas,
             messages=messages,
-        )
+        ) as flux:
+            for evenement in flux:
+                if evenement.type == "content_block_delta" \
+                        and evenement.delta.type == "text_delta":
+                    yield {"type": "texte_delta", "texte": evenement.delta.text}
+            reponse = flux.get_final_message()
 
         tokens_entree_total += reponse.usage.input_tokens
         tokens_sortie_total += reponse.usage.output_tokens
@@ -188,29 +202,35 @@ def planifier(intention: str, plan_id: int, origine: str = "AGENT") -> dict:
         # continuer : sans ca, il "oublierait" avoir demande un outil.
         messages.append({"role": "assistant", "content": reponse.content})
 
+        texte_final += "".join(
+            bloc.text for bloc in reponse.content if bloc.type == "text"
+        )
         appels = [bloc for bloc in reponse.content if bloc.type == "tool_use"]
 
         if not appels:
-            # Aucun outil demande : la reponse en texte est definitive.
-            # Les actions, elles, sont deja en base : on les relit pour
-            # que le front les affiche sans un deuxieme aller-retour.
-            texte = "".join(
-                bloc.text for bloc in reponse.content if bloc.type == "text"
-            )
-            return {
-                "reponse": texte,
+            # Aucun outil demande : la reponse est definitive. Les
+            # actions sont deja en base (propose_action les y a ecrites
+            # au fil des tours precedents), on les relit une derniere
+            # fois pour que le recapitulatif final soit exhaustif.
+            yield {
+                "type": "fin",
+                "reponse": texte_final,
                 "actions": db.lister_actions(plan_id),
                 "trace": trace,
                 "tokens_entree": tokens_entree_total,
                 "tokens_sortie": tokens_sortie_total,
                 "cout_eur": _cout_eur(tokens_entree_total, tokens_sortie_total),
             }
+            return
 
-        # Claude peut demander plusieurs outils dans le meme tour : on les
-        # execute tous, et on renvoie TOUS les resultats dans un seul
-        # message, jamais repartis sur plusieurs tours.
+        # Claude peut demander plusieurs outils dans le meme tour : on
+        # les execute l'un apres l'autre (pas en parallele, pour garder
+        # une trace lisible et un ordre de propose_action deterministe),
+        # et on renvoie TOUS les resultats dans un seul message ensuite.
         resultats_pour_claude = []
         for appel in appels:
+            yield {"type": "outil_appel", "outil": appel.name, "arguments": appel.input}
+
             debut = time.monotonic()
             resultat, erreur = _executer_outil(appel.name, appel.input, handlers)
             duree_ms = round((time.monotonic() - debut) * 1000)
@@ -222,17 +242,29 @@ def planifier(intention: str, plan_id: int, origine: str = "AGENT") -> dict:
                 "is_error": erreur,
             })
 
-            trace.append({
+            entree_trace = {
                 "outil": appel.name,
                 "arguments": appel.input,
                 "resultat": resultat,
                 "erreur": erreur,
                 "duree_ms": duree_ms,
-            })
+            }
+            trace.append(entree_trace)
+            yield {"type": "outil_resultat", **entree_trace}
+
+            if appel.name == proposer.SCHEMA["name"] and not erreur:
+                # L'action vient d'etre ecrite en base par propose_action :
+                # on la relit et on l'envoie telle quelle, prete a devenir
+                # une ligne a l'ecran sans attendre la fin du plan entier.
+                yield {
+                    "type": "action_proposee",
+                    "action": db.lire_action(resultat["action_id"]),
+                }
 
         messages.append({"role": "user", "content": resultats_pour_claude})
 
-    raise BoucleTropLongue(
-        f"Claude n'a pas conclu apres {MAX_TOURS} tours d'outils. "
-        "Le plan n'a pas pu etre finalise."
-    )
+    yield {
+        "type": "erreur",
+        "message": f"Claude n'a pas conclu apres {MAX_TOURS} tours d'outils. "
+                   "Le plan n'a pas pu etre finalise.",
+    }
