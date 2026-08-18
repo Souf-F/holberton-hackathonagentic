@@ -20,24 +20,35 @@
 
 * { box-sizing: border-box; }
 
+html { -webkit-text-size-adjust: 100%; }
+
 body {
     margin: 0;
+    /* dvh suit la barre d'adresse mobile, vh la ignore. Le fallback sert
+       aux navigateurs qui ne connaissent pas dvh. */
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 2rem 1rem;
+    padding: 1.5rem 1rem;
     background: var(--fond);
     color: var(--texte);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
 }
 
+/* Des qu'un plan s'affiche, on cesse de centrer verticalement : sinon le haut
+   du contenu sort de l'ecran et devient inaccessible au scroll. */
+body.avec-resultat { justify-content: flex-start; }
+
 h1 {
-    font-size: clamp(2.5rem, 8vw, 4rem);
+    font-size: clamp(2rem, 9vw, 3.5rem);
     font-weight: 400;
-    letter-spacing: 0.08em;
-    margin: 0 0 2rem;
+    letter-spacing: 0.06em;
+    margin: 0 0 1.75rem;
+    text-align: center;
 }
 
 form {
@@ -49,8 +60,9 @@ form {
 
 input {
     flex: 1;
-    padding: 0.9rem 1.2rem;
-    font-size: 1rem;
+    min-width: 0;              /* sans ca, un input en flex refuse de retrecir */
+    padding: 0.85rem 1.1rem;
+    font-size: 1rem;           /* 16px minimum, sinon iOS zoome au focus */
     color: var(--texte);
     background: var(--fond);
     border: 1px solid var(--bordure);
@@ -60,47 +72,59 @@ input {
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 button {
-    padding: 0.9rem 1.5rem;
+    padding: 0.85rem 1.4rem;
     font-size: 1rem;
+    font-family: inherit;
     color: var(--fond);
     background: var(--accent);
     border: none;
     border-radius: 2rem;
     cursor: pointer;
+    white-space: nowrap;
+    min-height: 44px;          /* cible tactile confortable */
 }
 
 button:disabled { opacity: 0.5; cursor: wait; }
 
 .exemple {
-    margin-top: 1rem;
+    margin: 1rem 0 0;
     font-size: 0.875rem;
     color: var(--texte-doux);
     text-align: center;
+    max-width: 32rem;
 }
 
 #resultat {
     width: 100%;
     max-width: 36rem;
-    margin-top: 2rem;
+    margin-top: 1.75rem;
 }
 
 #resultat pre {
-    padding: 1.25rem;
+    padding: 1.1rem;
     background: var(--zone);
     border: 1px solid var(--bordure);
     border-radius: 0.75rem;
     white-space: pre-wrap;
-    word-wrap: break-word;
+    overflow-wrap: anywhere;   /* une URL longue ne fait plus deborder la page */
     font-family: inherit;
-    line-height: 1.6;
+    font-size: 0.95rem;
+    line-height: 1.65;
     margin: 0;
 }
 
 .meta {
-    margin-top: 0.75rem;
+    margin: 0.75rem 0 0;
     font-size: 0.8125rem;
     color: var(--texte-doux);
     text-align: right;
 }
 
 .erreur { color: #c0392b; }
+
+/* Telephones : le bouton passe sous le champ, sinon les deux sont a l'etroit. */
+@media (max-width: 520px) {
+    form { flex-direction: column; }
+    button { width: 100%; }
+    h1 { margin-bottom: 1.25rem; }
+}
