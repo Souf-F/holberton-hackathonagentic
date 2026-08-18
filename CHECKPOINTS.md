@@ -37,15 +37,44 @@ Repetition faite a deux : [ ]
 
 Presente par : **Souf**
 
-- [ ] Les 4 tables existent : `plans`, `actions`, `executions`, `audit_log`
-- [ ] Un plan ecrit en dur (sans LLM) s'affiche a l'ecran
-- [ ] On peut approuver et refuser action par action
-- [ ] Un seul outil simple s'execute reellement
-- [ ] Le journal se remplit
-- [ ] **Deploye en ligne** (carte bonus "deploye tot")
-- [ ] `JOURNAL.md` entree du palier ecrite
-- [ ] Tout fusionne sur `dev` puis sur `main`
-- [ ] Relecture croisee de 15 minutes faite
+Objectif reel : un squelette qui tourne de bout en bout, avec un appel LLM
+qui s'affiche a l'ecran. Pas de fonctionnalite. Juste le tuyau, ouvert.
+
+### Ce qu'il demande
+
+- [x] Depot Git, premier commit dans les 30 minutes, historique lisible
+- [x] Un front minimal et un back qui expose au moins une route, les deux demarrent
+- [x] Un appel LLM reel qui remonte jusqu'a l'ecran
+- [x] `.env.example` commite, `.env` dans le `.gitignore`
+- [x] `README.md` avec un quickstart : clone, install, lancer
+- [x] **CARTE BONUS +5 : deploye et ouvrable depuis un telephone**
+      https://pennyworth.adamzou.fr
+
+### Ce qu'il fait devant nous
+
+- [ ] Il clone le depot sur SA machine et lance en suivant notre README.
+      **Moins de 5 minutes, sinon le palier n'est pas valide.**
+      A tester sur la machine de l'autre AVANT de traverser la salle.
+- [ ] Premier oral du code : il ouvre un fichier au hasard et designe l'un de
+      nous. « C'est l'IA qui l'a ecrit » n'est pas une reponse.
+- [ ] Il demande ou sont nos cles d'API. La bonne reponse ne contient pas le
+      mot « front ».
+
+### Ce qui reste de notre cote
+
+- [ ] Le clone chronometre, dans un dossier vide, sur la machine de l'autre
+- [ ] Relecture croisee de 15 minutes : chacun explique le code de l'autre
+- [ ] Souf a lu `src/db.py`, `src/main.py` et `src/planner.py` a voix haute
+- [ ] Souf a configure son identite git (le premier commit est signe Mr.Robot)
+- [ ] `JOURNAL.md` : entree du palier 2, ecrite par chacun
+- [ ] `dev` fusionne dans `main` (le formateur clone `main`)
+
+### La reponse sur les cles, a savoir dire par les deux
+
+> En local, dans un `.env` qui est dans le `.gitignore`. En production, dans
+> les variables d'environnement de l'hebergeur. Le depot n'en contient aucune,
+> et le navigateur non plus : il ne parle qu'a notre serveur. Le seul fichier
+> du projet qui touche a Claude est `src/planner.py`.
 
 ---
 
