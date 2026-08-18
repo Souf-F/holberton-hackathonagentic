@@ -9,7 +9,7 @@ cote serveur, lues depuis .env. Le navigateur n'appelle jamais Anthropic.
 
 import os
 
-from anthropic import Anthropic
+from anthropic import Anthropic, AuthenticationError
 
 MODELE = os.getenv("ANTHROPIC_MODEL", "claude-opus-5")
 
