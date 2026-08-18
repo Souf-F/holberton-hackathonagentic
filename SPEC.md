@@ -25,9 +25,9 @@ validées une par une par un humain avant toute exécution réelle.
    pertinentes, sans avoir à retenir la checklist par cœur.
 
 2. **En tant que** responsable RH, **je veux** approuver ou refuser chaque action
-   individuellement avant qu'elle ne s'exécute, **afin de** garder le contrôle sur ce que
-   l'agent fait réellement, et de voir immédiatement l'impact d'un refus sur les actions
-   qui en dépendaient.
+   individuellement, et compléter le plan avec une tâche que l'agent n'a pas prévue,
+   **afin de** garder le contrôle sur ce qui part réellement, et de voir immédiatement
+   l'impact d'un refus sur les actions qui en dépendaient.
 
 3. **En tant que** responsable RH, **je veux** consulter un journal des actions exécutées
    et pouvoir en annuler une, **afin de** corriger une erreur sans tout recommencer
@@ -46,8 +46,10 @@ validées une par une par un humain avant toute exécution réelle.
    automatiquement les actions qui en dépendaient.
 5. Pas de planification d'actions différées dans le temps (tout s'exécute immédiatement
    après approbation, pas de "envoyer ce message dans 3 jours").
-6. Pas de re-planification automatique après un refus. L'agent ne propose pas de plan B
-   tout seul : bonus possible au palier 5, pas dans le MVP.
+6. Pas de re-planification **automatique**. L'agent ne propose jamais de plan B de
+   lui-même après un refus. En revanche l'utilisateur peut demander des actions
+   supplémentaires via la barre d'ajout, ce qui relance le planificateur avec le plan
+   courant en contexte. La différence tient au déclencheur, et il est toujours humain.
 7. Pas de gestion des conflits si deux utilisateurs modifient le même plan en parallèle.
 8. Pas de rollback transactionnel. Nous faisons de la compensation explicite, action par
    action, parce qu'un message envoyé n'est pas annulable. Nous documentons les actions
@@ -107,53 +109,40 @@ signature typée, de schéma envoyé au modèle, et de validateur à l'exécutio
 Le principe : **le cerveau et le bras ne se parlent jamais directement.** Ils
 communiquent par la base de données, et l'humain est entre les deux.
 
-```
-   [Utilisateur]
-        │ intention en langage naturel
-        ▼
-   [Front : index.html]  ──POST /plans──►  [API : main.py]
-                                                │
-                                                ▼
-                              ┌──────────────────────────────────┐
-                              │  PLANIFICATEUR (agent.py)        │
-                              │  boucle agentique + LLM          │
-                              │                                  │
-                              │  outils disponibles :            │
-                              │   - lecture seule                │
-                              │   - propose_action()             │
-                              │                                  │
-                              │  AUCUN outil à effet de bord     │
-                              └────────────────┬─────────────────┘
-                                               │ écrit des lignes
-                                               │ état = PROPOSEE
-                                               ▼
-                                    ╔═══════════════════════╗
-                                    ║   SQLite              ║
-                                    ║   plans / actions     ║
-                                    ║   executions / audit  ║
-                                    ╚═══════════╤═══════════╝
-                                                │
-        [Front : plan.html]  ◄──SSE─────────────┤
-             │ l'humain coche                   │
-             └──PATCH /actions/{id}─────────────┤
-                    état = APPROUVEE            │
-                                                ▼
-                              ┌──────────────────────────────────┐
-                              │  EXECUTEUR (executor.py)         │
-                              │  aucun accès au LLM              │
-                              │  lit UNIQUEMENT etat=APPROUVEE   │
-                              │  clé d'idempotence obligatoire   │
-                              └────────────────┬─────────────────┘
-                                               ▼
-                              [tools.py] ──► API GitHub réelle
-                                         ──► outbox/ (messagerie locale)
-                                         ──► artifacts/ (fichiers, .ics)
-                                               │
-                                               ▼
-                                    [audit.py] ──► journal append-only
-                                               │
-                                               ▼
-                                    [Front : journal.html]
+```mermaid
+flowchart TD
+    U(["Utilisateur"]) -->|"intention en langage naturel"| F1["Front : index.html"]
+    F1 -->|"POST /plans"| API["API FastAPI"]
+
+    subgraph CERVEAU["CERVEAU : aucun outil à effet de bord"]
+        API --> P["planner.py<br/>boucle agentique"]
+        P <-->|"outils de lecture seule"| LLM["Claude"]
+    end
+
+    P -->|"propose_action<br/>état = PROPOSEE"| DB[("SQLite")]
+
+    subgraph VALID["VALIDATION HUMAINE"]
+        F2["Front : plan.html<br/>toutes les cases décochées"]
+    end
+
+    DB -.->|"flux SSE"| F2
+    H(["Humain"]) -->|"coche, refuse, ajoute"| F2
+    F2 -->|"PATCH /actions/:id<br/>état = APPROUVEE"| DB
+
+    subgraph BRAS["BRAS : aucun accès au LLM"]
+        E["executor.py<br/>lit uniquement état = APPROUVEE"]
+    end
+
+    DB --> E
+    E --> GH["API GitHub réelle"]
+    E --> OB["outbox/ fichiers .eml"]
+    E --> AR["artifacts/ fichiers .ics"]
+    E --> AU["audit_log"]
+    AU --> F3["Front : journal.html"]
+
+    style CERVEAU fill:#e8f0fe,stroke:#4285f4
+    style VALID fill:#fef7e0,stroke:#f9ab00
+    style BRAS fill:#fce8e6,stroke:#d93025
 ```
 
 **Les trois propriétés que nous défendons au checkpoint :**
@@ -211,19 +200,113 @@ L'annulation n'est **pas** un outil de l'agent. C'est une route de l'API
 
 ## Cycle de vie d'une action
 
+```mermaid
+stateDiagram-v2
+    [*] --> PROPOSEE : proposée par l'agent<br/>ou ajoutée par l'humain
+    PROPOSEE --> APPROUVEE : approbation humaine
+    PROPOSEE --> REFUSEE : refus humain
+    PROPOSEE --> BLOQUEE : son parent a été refusé
+    APPROUVEE --> EXECUTEE : exécution réussie
+    APPROUVEE --> ECHOUEE : erreur à l'exécution
+    EXECUTEE --> COMPENSEE : annulation humaine
+    REFUSEE --> [*]
+    BLOQUEE --> [*]
+    ECHOUEE --> [*]
+    COMPENSEE --> [*]
 ```
-                        refus humain
-      ┌──────────────────────────────────────► REFUSEE
-      │
-   PROPOSEE ──── approbation humaine ────► APPROUVEE ──► EXECUTEE ──► COMPENSEE
-      │                                                      │
-      │  le parent a été refusé                              └──► ECHOUEE
-      └──────────────────────────────────► BLOQUEE
-```
+
+Seul l'état `APPROUVEE` est lu par l'exécuteur. Aucun autre chemin ne mène au monde réel.
 
 Chaque action porte un champ `depends_on`. Refuser une action bascule automatiquement ses
 enfants en `BLOQUEE`, avec le motif affiché à l'écran. C'est le comportement que nous
 montrons en démo.
+
+Chaque action porte aussi un champ `origine` : `AGENT` si le planificateur l'a proposée,
+`HUMAIN` si elle vient de la barre d'ajout. Le journal d'audit conserve cette information.
+
+---
+
+## Schéma des données
+
+Quatre tables. Le SQL exécutable sera écrit ensemble au palier 2, dans `schema.sql`.
+
+```mermaid
+erDiagram
+    plans ||--o{ actions : "contient"
+    actions ||--o| executions : "produit au plus une"
+    plans ||--o{ audit_log : "trace dans"
+    actions ||--o{ audit_log : "trace dans"
+
+    plans {
+        integer id PK
+        text intention "ce que l utilisateur a tape"
+        text etat "PLANIFICATION PRET EXECUTE"
+        real cout_eur
+        integer tokens_entree
+        integer tokens_sortie
+        text cree_le
+    }
+
+    actions {
+        integer id PK
+        integer plan_id FK
+        integer position "ordre d affichage"
+        text outil "create_github_issue etc"
+        text arguments "JSON des parametres"
+        text raison "pourquoi l agent la propose"
+        integer reversible "0 ou 1, affiche avant le clic"
+        integer depends_on FK "autre action, nullable"
+        text origine "AGENT ou HUMAIN"
+        text etat "voir cycle de vie"
+        text cle_idempotence "calculee des la planification"
+        text cree_le
+    }
+
+    executions {
+        integer id PK
+        integer action_id FK
+        text cle_idempotence UK "UNIQUE, la garantie anti doublon"
+        text statut "SUCCES ou ECHEC"
+        text resultat "JSON url id chemin"
+        text erreur
+        text execute_le
+    }
+
+    audit_log {
+        integer id PK
+        integer plan_id FK
+        integer action_id FK "nullable"
+        text evenement "ACTION_APPROUVEE ACTION_REFUSEE etc"
+        text acteur "AGENT ou HUMAIN"
+        text details
+        text horodatage
+    }
+```
+
+### Pourquoi quatre tables et pas deux
+
+| Table | Ce qu'elle contient |
+|---|---|
+| `plans` | Ce que l'utilisateur a demandé. Une ligne par intention saisie. |
+| `actions` | Les lignes du plan. Ce qu'on **veut** faire. |
+| `executions` | Ce qui s'est **réellement** passé. La preuve. |
+| `audit_log` | L'histoire complète, y compris ce qui n'est jamais parti. |
+
+**Séparer `actions` et `executions` n'est pas cosmétique.** Une action est une intention,
+elle existe dès que l'agent la propose. Une exécution est un fait, elle n'existe qu'après
+coup. Trois conséquences :
+
+1. **L'idempotence devient une garantie de la base, pas du code.** La contrainte `UNIQUE`
+   sur `executions.cle_idempotence` rend le doublon impossible au niveau du moteur. Ce
+   n'est plus "on a pensé à vérifier".
+2. **Le résultat est conservé.** Au second clic, on ne réexécute pas : on relit la ligne
+   et on renvoie l'URL déjà obtenue.
+3. **La table `actions` reste propre**, sans colonnes qui n'auraient de sens qu'après
+   exécution.
+
+`audit_log` est encore autre chose : un refus n'a jamais d'exécution mais doit apparaître
+dans l'histoire, et une annulation ne crée pas de nouvelle action mais doit se voir. Le
+journal enregistre aussi ce qui n'est pas arrivé, et pourquoi.
 
 ---
 
@@ -251,31 +334,122 @@ montrons en démo.
 
 ## Happy path de la démo finale (6 étapes)
 
-1. J'ouvre Pennyworth et je saisis : *"Prépare l'arrivée de Jean, stagiaire développeur,
-   qui commence lundi."*
+1. J'ouvre Pennyworth. Un seul champ au centre de l'écran. Je saisis :
+   *"Prépare l'arrivée de Jean, stagiaire développeur, qui commence lundi."*
 
-2. Le plan se construit en direct à l'écran. L'agent consulte d'abord l'équipe et le
-   calendrier du tuteur, puis propose 5 actions numérotées, chacune avec l'outil concerné,
-   ses arguments, et la raison invoquée.
+2. Le plan se construit ligne par ligne sous mes yeux. L'agent consulte d'abord l'équipe
+   et le calendrier du tuteur, puis propose 5 actions, **toutes décochées**. Chacune
+   affiche l'outil concerné, ses arguments, la raison invoquée, sa réversibilité et son
+   origine.
 
-3. Chaque ligne affiche son effet de bord et sa réversibilité. L'envoi du message de
-   bienvenue est marqué **non annulable** en rouge, avant tout clic.
+3. La ligne 3, l'envoi du message de bienvenue, est marquée **IRRÉVERSIBLE** en rouge,
+   avant tout clic. La ligne 4 indique qu'elle dépend de la 3.
 
-4. J'approuve les actions 1, 2 et 5. Je refuse l'action 3 (le message de bienvenue).
-   L'action 4, qui envoyait ses identifiants et dépendait de la 3, bascule
-   automatiquement en **bloquée**, avec le motif affiché.
+4. J'utilise la barre d'ajout : *"prévois aussi un point avec le tuteur jeudi"*. Le
+   planificateur repart avec le plan courant en contexte et ajoute une 6e ligne, marquée
+   comme venant de moi, décochée comme les autres. J'approuve ensuite les lignes 1, 2, 5
+   et 6, et je refuse la 3. La ligne 4 bascule automatiquement en **bloquée**, avec le
+   motif affiché.
 
-5. Je lance l'exécution. Les trois actions approuvées partent l'une après l'autre.
+5. Je lance l'exécution. Les quatre actions approuvées partent l'une après l'autre.
    L'issue GitHub apparaît réellement, avec son URL cliquable. Le journal se remplit en
-   direct, horodaté, avec le coût du plan affiché. Je clique une deuxième fois sur
-   "exécuter" : rien ne part en double, la clé d'idempotence a fait son travail.
+   direct, horodaté, avec le coût du plan. Je clique une deuxième fois sur exécuter :
+   rien ne part en double, la clé d'idempotence a fait son travail.
 
 6. Depuis le journal, j'annule l'action 2. La compensation s'exécute, l'issue GitHub se
    ferme réellement, et le journal enregistre l'annulation **sans effacer** l'entrée
    d'origine.
 
-**Cas d'échec de la minute 5 de la démo :** le refus de l'action 3 qui bloque l'action 4.
+**Cas d'échec de la minute 5 de la démo :** le refus de la ligne 3 qui bloque la ligne 4.
 Ce n'est pas un bug, c'est notre garde-fou qui fonctionne.
+
+---
+
+## Interface
+
+Trois écrans. Pas de fil de discussion : on ne converse pas avec Pennyworth, on lui donne
+une intention. C'est déjà une réponse au palier 3, celui où le projet doit cesser d'être
+un chatbot.
+
+### Écran 1, l'intention
+
+```
++------------------------------------------------------+
+|                                                      |
+|                  P e n n y w o r t h                 |
+|                                                      |
+|   +----------------------------------------------+   |
+|   |  Que dois-je préparer ?                      |   |
+|   +----------------------------------------------+   |
+|                                                      |
+|      Exemple : prépare l'arrivée de Jean,            |
+|      stagiaire dev, lundi                            |
+|                                                      |
++------------------------------------------------------+
+```
+
+### Écran 2, le plan
+
+```
++------------------------------------------------------------+
+|  « Prépare l'arrivée de Jean, stagiaire dev, lundi »        |
+|                                             0,04 EUR · 3,2s|
++------------------------------------------------------------+
+|                                                            |
+|  [ ] 1  Créer la fiche employé de Jean Dupont              |
+|         base locale · annulable                  [Alfred]  |
+|                                                            |
+|  [ ] 2  Créer l'issue GitHub « Onboarding Jean »           |
+|         API GitHub réelle · annulable            [Alfred]  |
+|                                                            |
+|  [ ] 3  Envoyer le message de bienvenue à Jean             |
+|         /!\ IRRÉVERSIBLE, un message parti est parti       |
+|                                                  [Alfred]  |
+|                                                            |
+|  [ ] 4  Envoyer ses identifiants à Jean                    |
+|         dépend du point 3                        [Alfred]  |
+|                                                            |
+|  [ ] 5  Réserver le café d'équipe lundi 10h                |
+|         fichier .ics · annulable                 [Alfred]  |
+|                                                            |
+|  +------------------------------------------------------+  |
+|  |  + Ajouter une tâche                                 |  |
+|  +------------------------------------------------------+  |
+|                                                            |
+|                          [ Exécuter les tâches cochées ]   |
++------------------------------------------------------------+
+```
+
+### Écran 3, le journal
+
+Après exécution, le plan devient le journal : même page, état suivant. Ce qui est parti, à
+quelle heure, avec un bouton d'annulation sur ce qui est annulable. Les lignes refusées
+restent affichées, parce qu'un refus fait partie de l'histoire.
+
+### Quatre décisions de design, et pourquoi
+
+1. **Toutes les cases arrivent décochées.** Si le plan arrivait pré-coché, l'utilisateur
+   cliquerait "exécuter" sans lire et la validation humaine deviendrait un décor. Décoché
+   par défaut, chaque approbation est un geste conscient. C'est le choix le plus important
+   de l'interface.
+2. **L'irréversibilité s'affiche sur la ligne, avant le clic**, jamais dans une fenêtre de
+   confirmation postérieure : une confirmation qui arrive après la décision arrive trop
+   tard pour l'informer.
+3. **La dépendance est visible et active.** Refuser une action grise ses dépendantes avec
+   le motif, sans que l'utilisateur ait à le déduire.
+4. **L'origine de chaque ligne est marquée** : proposée par l'agent, ou ajoutée par
+   l'humain. Sur un sujet dont le cœur est la traçabilité, le journal doit pouvoir
+   répondre à "qui a décidé de ça".
+
+### La barre d'ajout
+
+L'utilisateur écrit en langage naturel ce qu'il veut ajouter. Ce n'est pas un formulaire
+technique : on relance le **même** planificateur, avec le plan courant en contexte, et il
+produit les `propose_action` manquantes. Aucun code de planification supplémentaire.
+
+Une tâche ajoutée par l'humain arrive en `PROPOSEE` et **décochée**, comme les autres.
+Elle ne s'auto-approuve pas sous prétexte qu'elle vient de l'utilisateur : ce serait la
+première exception au principe, celle que notre hors scope refuse explicitement.
 
 ---
 
