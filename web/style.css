@@ -1,21 +1,12 @@
 :root {
     --fond: #ffffff;
+    --fond-carte: #f7f7f8;
     --texte: #1a1a1a;
     --texte-doux: #6b6b6b;
-    --bordure: #d9d9d9;
+    --bordure: #e2e2e4;
     --accent: #1a1a1a;
-    --zone: #f7f7f7;
-}
-
-@media (prefers-color-scheme: dark) {
-    :root {
-        --fond: #111111;
-        --texte: #f0f0f0;
-        --texte-doux: #9a9a9a;
-        --bordure: #333333;
-        --accent: #f0f0f0;
-        --zone: #1c1c1c;
-    }
+    --erreur: #c0392b;
+    --erreur-fond: #fdf0ee;
 }
 
 * { box-sizing: border-box; }
@@ -24,8 +15,6 @@ html { -webkit-text-size-adjust: 100%; }
 
 body {
     margin: 0;
-    /* dvh suit la barre d'adresse mobile, vh la ignore. Le fallback sert
-       aux navigateurs qui ne connaissent pas dvh. */
     min-height: 100vh;
     min-height: 100dvh;
     display: flex;
@@ -39,8 +28,6 @@ body {
     line-height: 1.5;
 }
 
-/* Des qu'un plan s'affiche, on cesse de centrer verticalement : sinon le haut
-   du contenu sort de l'ecran et devient inaccessible au scroll. */
 body.avec-resultat { justify-content: flex-start; }
 
 h1 {
@@ -49,6 +36,7 @@ h1 {
     letter-spacing: 0.06em;
     margin: 0 0 1.75rem;
     text-align: center;
+    animation: apparition 0.5s ease-out;
 }
 
 form {
@@ -60,30 +48,38 @@ form {
 
 input {
     flex: 1;
-    min-width: 0;              /* sans ca, un input en flex refuse de retrecir */
+    min-width: 0;
     padding: 0.85rem 1.1rem;
-    font-size: 1rem;           /* 16px minimum, sinon iOS zoome au focus */
+    font-size: 1rem;
     color: var(--texte);
     background: var(--fond);
     border: 1px solid var(--bordure);
     border-radius: 2rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.08);
+}
 
 button {
     padding: 0.85rem 1.4rem;
     font-size: 1rem;
     font-family: inherit;
-    color: var(--fond);
+    color: #fff;
     background: var(--accent);
     border: none;
     border-radius: 2rem;
     cursor: pointer;
     white-space: nowrap;
-    min-height: 44px;          /* cible tactile confortable */
+    min-height: 44px;
+    transition: transform 0.1s ease, opacity 0.15s ease;
 }
 
+button:hover:not(:disabled) { transform: translateY(-1px); }
+button:active:not(:disabled) { transform: translateY(0); }
 button:disabled { opacity: 0.5; cursor: wait; }
 
 .exemple {
@@ -100,29 +96,126 @@ button:disabled { opacity: 0.5; cursor: wait; }
     margin-top: 1.75rem;
 }
 
-#resultat pre {
+/* --- Attente : trois points qui pulsent, pendant que Claude reflechit --- */
+.attente {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
     padding: 1.1rem;
-    background: var(--zone);
+    color: var(--texte-doux);
+    font-size: 0.95rem;
+}
+
+.attente .points span {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-left: 3px;
+    border-radius: 50%;
+    background: var(--texte-doux);
+    animation: pulse 1.2s ease-in-out infinite;
+}
+.attente .points span:nth-child(2) { animation-delay: 0.15s; }
+.attente .points span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes pulse {
+    0%, 60%, 100% { opacity: 0.25; transform: scale(0.85); }
+    30% { opacity: 1; transform: scale(1); }
+}
+
+/* --- Carte de reponse --- */
+.carte {
+    padding: 1.1rem;
+    background: var(--fond-carte);
     border: 1px solid var(--bordure);
     border-radius: 0.75rem;
+    animation: apparition 0.35s ease-out;
+}
+
+.carte pre {
     white-space: pre-wrap;
-    overflow-wrap: anywhere;   /* une URL longue ne fait plus deborder la page */
+    overflow-wrap: anywhere;
     font-family: inherit;
     font-size: 0.95rem;
     line-height: 1.65;
     margin: 0;
 }
 
-.meta {
-    margin: 0.75rem 0 0;
-    font-size: 0.8125rem;
-    color: var(--texte-doux);
-    text-align: right;
+.carte.erreur {
+    color: var(--erreur);
+    background: var(--erreur-fond);
+    border-color: #f3d4cf;
 }
 
-.erreur { color: #c0392b; }
+@keyframes apparition {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
 
-/* Telephones : le bouton passe sous le champ, sinon les deux sont a l'etroit. */
+.meta {
+    margin: 0.75rem 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    font-size: 0.8125rem;
+    color: var(--texte-doux);
+}
+
+.meta .puce {
+    padding: 0.2rem 0.6rem;
+    background: var(--fond-carte);
+    border: 1px solid var(--bordure);
+    border-radius: 1rem;
+}
+
+/* --- Panneau debug : les appels d'outils --- */
+.debug {
+    margin-top: 0.75rem;
+    animation: apparition 0.4s ease-out;
+}
+
+.debug summary {
+    cursor: pointer;
+    font-size: 0.8125rem;
+    color: var(--texte-doux);
+    padding: 0.4rem 0;
+    user-select: none;
+}
+
+.debug summary:hover { color: var(--texte); }
+
+.appel-outil {
+    margin-top: 0.5rem;
+    padding: 0.75rem 0.9rem;
+    background: var(--fond-carte);
+    border: 1px solid var(--bordure);
+    border-left: 3px solid var(--accent);
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+}
+
+.appel-outil.en-erreur { border-left-color: var(--erreur); }
+
+.appel-outil .ligne1 {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+
+.appel-outil .duree { font-weight: 400; color: var(--texte-doux); }
+
+.appel-outil .args,
+.appel-outil .resultat {
+    margin-top: 0.35rem;
+    color: var(--texte-doux);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.appel-outil.en-erreur .resultat { color: var(--erreur); }
+
 @media (max-width: 520px) {
     form { flex-direction: column; }
     button { width: 100%; }
