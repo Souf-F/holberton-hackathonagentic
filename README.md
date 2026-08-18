@@ -10,26 +10,44 @@ humaine, action par action.**
 Hackathon Full Stack Agentique, Holberton School. Sujet 03, LE BRAS.
 Binome : [Adam](https://github.com/Adamzou-lab) et [Souf](https://github.com/Souf-F).
 
-**Etat : palier 1 (cadrage) termine. Aucun code a ce stade, c'est voulu.**
+**Etat : palier 2 (socle). Le tuyau est ouvert : une intention entre, Claude repond, ca s'affiche.**
 
 ---
 
 ## Quickstart
 
-> A completer au palier 2, quand le socle tournera.
-> Objectif impose : demarrage en moins de 5 minutes sur une machine vierge.
-> Sera chronometre reellement au palier 5, dans un dossier vide.
+Python 3.9 ou plus. Aucun autre prerequis : pas de base a installer, pas de Docker.
 
 ```bash
 git clone https://github.com/Souf-F/holberton-hackathonagentic.git
 cd holberton-hackathonagentic
-cp .env.example .env      # puis remplir ANTHROPIC_API_KEY et GITHUB_TOKEN
-# ... suite au palier 2
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # puis renseigner ANTHROPIC_API_KEY
+uvicorn src.main:app --reload
 ```
 
-Python 3.12 (voir `.python-version`).
+Puis ouvrir **http://127.0.0.1:8000**
 
----
+La base SQLite et ses quatre tables sont creees automatiquement au premier
+demarrage, dans `data/pennyworth.db`.
+
+### Ou sont les cles d'API
+
+Dans le fichier `.env`, **cote serveur uniquement**. Le navigateur ne parle qu'a
+notre propre API : il n'appelle jamais Anthropic, et la cle ne quitte jamais la
+machine qui fait tourner le serveur. Le seul fichier du projet qui touche a
+Claude est `src/planner.py`.
+
+### Structure
+
+```
+src/main.py      le serveur : routes de l'API, sert aussi le front
+src/planner.py   le cerveau : le seul fichier qui appelle Claude
+src/db.py        acces SQLite, SQL brut, pas d'ORM
+schema.sql       les 4 tables
+web/             le front : une page, pas de framework
+```
 
 ## Architecture en une phrase
 
@@ -57,7 +75,7 @@ Schema detaille, cycle de vie d'une action et signatures d'outils : voir [SPEC.m
 
 | Couche | Choix |
 |---|---|
-| Langage | Python 3.12 |
+| Langage | Python 3.9+ |
 | Validation | Pydantic |
 | Back | FastAPI, flux SSE |
 | Base | SQLite |

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pennyworth</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <h1>Pennyworth</h1>
+
+    <form id="formulaire">
+        <input id="intention" type="text" autocomplete="off"
+               placeholder="Que dois-je préparer ?" required>
+        <button id="envoyer" type="submit">Demander</button>
+    </form>
+
+    <p class="exemple">
+        Exemple : prépare l'arrivée de Jean, stagiaire dev, lundi
+    </p>
+
+    <div id="resultat"></div>
+
+    <script>
+        const formulaire = document.getElementById("formulaire");
+        const champ = document.getElementById("intention");
+        const bouton = document.getElementById("envoyer");
+        const resultat = document.getElementById("resultat");
+
+        formulaire.addEventListener("submit", async (evenement) => {
+            evenement.preventDefault();
+
+            bouton.disabled = true;
+            resultat.innerHTML = "<pre>Pennyworth réfléchit...</pre>";
+
+            try {
+                // Le navigateur parle uniquement à notre serveur.
+                // Il n'appelle jamais Anthropic : la clé reste côté serveur.
+                const reponse = await fetch("/api/plans", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ intention: champ.value })
+                });
+
+                if (!reponse.ok) {
+                    const erreur = await reponse.json();
+                    throw new Error(erreur.detail || "Erreur du serveur");
+                }
+
+                const donnees = await reponse.json();
+                afficher(donnees);
+            } catch (erreur) {
+                resultat.innerHTML =
+                    `<pre class="erreur">${erreur.message}</pre>`;
+            } finally {
+                bouton.disabled = false;
+            }
+        });
+
+        function afficher(donnees) {
+            const texte = document.createElement("pre");
+            texte.textContent = donnees.reponse;
+
+            const meta = document.createElement("p");
+            meta.className = "meta";
+            meta.textContent =
+                `plan n°${donnees.plan_id} · ${donnees.cout_eur} € · ` +
+                `${donnees.tokens_entree} + ${donnees.tokens_sortie} tokens`;
+
+            resultat.replaceChildren(texte, meta);
+        }
+    </script>
+</body>
+</html>

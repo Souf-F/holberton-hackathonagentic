@@ -1,0 +1,106 @@
+:root {
+    --fond: #ffffff;
+    --texte: #1a1a1a;
+    --texte-doux: #6b6b6b;
+    --bordure: #d9d9d9;
+    --accent: #1a1a1a;
+    --zone: #f7f7f7;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --fond: #111111;
+        --texte: #f0f0f0;
+        --texte-doux: #9a9a9a;
+        --bordure: #333333;
+        --accent: #f0f0f0;
+        --zone: #1c1c1c;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    background: var(--fond);
+    color: var(--texte);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+h1 {
+    font-size: clamp(2.5rem, 8vw, 4rem);
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    margin: 0 0 2rem;
+}
+
+form {
+    width: 100%;
+    max-width: 36rem;
+    display: flex;
+    gap: 0.5rem;
+}
+
+input {
+    flex: 1;
+    padding: 0.9rem 1.2rem;
+    font-size: 1rem;
+    color: var(--texte);
+    background: var(--fond);
+    border: 1px solid var(--bordure);
+    border-radius: 2rem;
+}
+
+input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+button {
+    padding: 0.9rem 1.5rem;
+    font-size: 1rem;
+    color: var(--fond);
+    background: var(--accent);
+    border: none;
+    border-radius: 2rem;
+    cursor: pointer;
+}
+
+button:disabled { opacity: 0.5; cursor: wait; }
+
+.exemple {
+    margin-top: 1rem;
+    font-size: 0.875rem;
+    color: var(--texte-doux);
+    text-align: center;
+}
+
+#resultat {
+    width: 100%;
+    max-width: 36rem;
+    margin-top: 2rem;
+}
+
+#resultat pre {
+    padding: 1.25rem;
+    background: var(--zone);
+    border: 1px solid var(--bordure);
+    border-radius: 0.75rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: inherit;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.meta {
+    margin-top: 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--texte-doux);
+    text-align: right;
+}
+
+.erreur { color: #c0392b; }
