@@ -109,53 +109,40 @@ signature typée, de schéma envoyé au modèle, et de validateur à l'exécutio
 Le principe : **le cerveau et le bras ne se parlent jamais directement.** Ils
 communiquent par la base de données, et l'humain est entre les deux.
 
-```
-   [Utilisateur]
-        │ intention en langage naturel
-        ▼
-   [Front : index.html]  ──POST /plans──►  [API : main.py]
-                                                │
-                                                ▼
-                              ┌──────────────────────────────────┐
-                              │  PLANIFICATEUR (agent.py)        │
-                              │  boucle agentique + LLM          │
-                              │                                  │
-                              │  outils disponibles :            │
-                              │   - lecture seule                │
-                              │   - propose_action()             │
-                              │                                  │
-                              │  AUCUN outil à effet de bord     │
-                              └────────────────┬─────────────────┘
-                                               │ écrit des lignes
-                                               │ état = PROPOSEE
-                                               ▼
-                                    ╔═══════════════════════╗
-                                    ║   SQLite              ║
-                                    ║   plans / actions     ║
-                                    ║   executions / audit  ║
-                                    ╚═══════════╤═══════════╝
-                                                │
-        [Front : plan.html]  ◄──SSE─────────────┤
-             │ l'humain coche                   │
-             └──PATCH /actions/{id}─────────────┤
-                    état = APPROUVEE            │
-                                                ▼
-                              ┌──────────────────────────────────┐
-                              │  EXECUTEUR (executor.py)         │
-                              │  aucun accès au LLM              │
-                              │  lit UNIQUEMENT etat=APPROUVEE   │
-                              │  clé d'idempotence obligatoire   │
-                              └────────────────┬─────────────────┘
-                                               ▼
-                              [tools.py] ──► API GitHub réelle
-                                         ──► outbox/ (messagerie locale)
-                                         ──► artifacts/ (fichiers, .ics)
-                                               │
-                                               ▼
-                                    [audit.py] ──► journal append-only
-                                               │
-                                               ▼
-                                    [Front : journal.html]
+```mermaid
+flowchart TD
+    U(["Utilisateur"]) -->|"intention en langage naturel"| F1["Front : index.html"]
+    F1 -->|"POST /plans"| API["API FastAPI"]
+
+    subgraph CERVEAU["CERVEAU : aucun outil à effet de bord"]
+        API --> P["planner.py<br/>boucle agentique"]
+        P <-->|"outils de lecture seule"| LLM["Claude"]
+    end
+
+    P -->|"propose_action<br/>état = PROPOSEE"| DB[("SQLite")]
+
+    subgraph VALID["VALIDATION HUMAINE"]
+        F2["Front : plan.html<br/>toutes les cases décochées"]
+    end
+
+    DB -.->|"flux SSE"| F2
+    H(["Humain"]) -->|"coche, refuse, ajoute"| F2
+    F2 -->|"PATCH /actions/:id<br/>état = APPROUVEE"| DB
+
+    subgraph BRAS["BRAS : aucun accès au LLM"]
+        E["executor.py<br/>lit uniquement état = APPROUVEE"]
+    end
+
+    DB --> E
+    E --> GH["API GitHub réelle"]
+    E --> OB["outbox/ fichiers .eml"]
+    E --> AR["artifacts/ fichiers .ics"]
+    E --> AU["audit_log"]
+    AU --> F3["Front : journal.html"]
+
+    style CERVEAU fill:#e8f0fe,stroke:#4285f4
+    style VALID fill:#fef7e0,stroke:#f9ab00
+    style BRAS fill:#fce8e6,stroke:#d93025
 ```
 
 **Les trois propriétés que nous défendons au checkpoint :**
@@ -213,15 +200,22 @@ L'annulation n'est **pas** un outil de l'agent. C'est une route de l'API
 
 ## Cycle de vie d'une action
 
+```mermaid
+stateDiagram-v2
+    [*] --> PROPOSEE : proposée par l'agent<br/>ou ajoutée par l'humain
+    PROPOSEE --> APPROUVEE : approbation humaine
+    PROPOSEE --> REFUSEE : refus humain
+    PROPOSEE --> BLOQUEE : son parent a été refusé
+    APPROUVEE --> EXECUTEE : exécution réussie
+    APPROUVEE --> ECHOUEE : erreur à l'exécution
+    EXECUTEE --> COMPENSEE : annulation humaine
+    REFUSEE --> [*]
+    BLOQUEE --> [*]
+    ECHOUEE --> [*]
+    COMPENSEE --> [*]
 ```
-                        refus humain
-      ┌──────────────────────────────────────► REFUSEE
-      │
-   PROPOSEE ──── approbation humaine ────► APPROUVEE ──► EXECUTEE ──► COMPENSEE
-      │                                                      │
-      │  le parent a été refusé                              └──► ECHOUEE
-      └──────────────────────────────────► BLOQUEE
-```
+
+Seul l'état `APPROUVEE` est lu par l'exécuteur. Aucun autre chemin ne mène au monde réel.
 
 Chaque action porte un champ `depends_on`. Refuser une action bascule automatiquement ses
 enfants en `BLOQUEE`, avec le motif affiché à l'écran. C'est le comportement que nous
@@ -229,6 +223,90 @@ montrons en démo.
 
 Chaque action porte aussi un champ `origine` : `AGENT` si le planificateur l'a proposée,
 `HUMAIN` si elle vient de la barre d'ajout. Le journal d'audit conserve cette information.
+
+---
+
+## Schéma des données
+
+Quatre tables. Le SQL exécutable sera écrit ensemble au palier 2, dans `schema.sql`.
+
+```mermaid
+erDiagram
+    plans ||--o{ actions : "contient"
+    actions ||--o| executions : "produit au plus une"
+    plans ||--o{ audit_log : "trace dans"
+    actions ||--o{ audit_log : "trace dans"
+
+    plans {
+        integer id PK
+        text intention "ce que l utilisateur a tape"
+        text etat "PLANIFICATION PRET EXECUTE"
+        real cout_eur
+        integer tokens_entree
+        integer tokens_sortie
+        text cree_le
+    }
+
+    actions {
+        integer id PK
+        integer plan_id FK
+        integer position "ordre d affichage"
+        text outil "create_github_issue etc"
+        text arguments "JSON des parametres"
+        text raison "pourquoi l agent la propose"
+        integer reversible "0 ou 1, affiche avant le clic"
+        integer depends_on FK "autre action, nullable"
+        text origine "AGENT ou HUMAIN"
+        text etat "voir cycle de vie"
+        text cle_idempotence "calculee des la planification"
+        text cree_le
+    }
+
+    executions {
+        integer id PK
+        integer action_id FK
+        text cle_idempotence UK "UNIQUE, la garantie anti doublon"
+        text statut "SUCCES ou ECHEC"
+        text resultat "JSON url id chemin"
+        text erreur
+        text execute_le
+    }
+
+    audit_log {
+        integer id PK
+        integer plan_id FK
+        integer action_id FK "nullable"
+        text evenement "ACTION_APPROUVEE ACTION_REFUSEE etc"
+        text acteur "AGENT ou HUMAIN"
+        text details
+        text horodatage
+    }
+```
+
+### Pourquoi quatre tables et pas deux
+
+| Table | Ce qu'elle contient |
+|---|---|
+| `plans` | Ce que l'utilisateur a demandé. Une ligne par intention saisie. |
+| `actions` | Les lignes du plan. Ce qu'on **veut** faire. |
+| `executions` | Ce qui s'est **réellement** passé. La preuve. |
+| `audit_log` | L'histoire complète, y compris ce qui n'est jamais parti. |
+
+**Séparer `actions` et `executions` n'est pas cosmétique.** Une action est une intention,
+elle existe dès que l'agent la propose. Une exécution est un fait, elle n'existe qu'après
+coup. Trois conséquences :
+
+1. **L'idempotence devient une garantie de la base, pas du code.** La contrainte `UNIQUE`
+   sur `executions.cle_idempotence` rend le doublon impossible au niveau du moteur. Ce
+   n'est plus "on a pensé à vérifier".
+2. **Le résultat est conservé.** Au second clic, on ne réexécute pas : on relit la ligne
+   et on renvoie l'URL déjà obtenue.
+3. **La table `actions` reste propre**, sans colonnes qui n'auraient de sens qu'après
+   exécution.
+
+`audit_log` est encore autre chose : un refus n'a jamais d'exécution mais doit apparaître
+dans l'histoire, et une annulation ne crée pas de nouvelle action mais doit se voir. Le
+journal enregistre aussi ce qui n'est pas arrivé, et pourquoi.
 
 ---
 
