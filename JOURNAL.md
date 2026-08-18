@@ -12,12 +12,19 @@ fichier, jamais au milieu. Chaque entree est signee.**
 
 ## Entree 1, palier 1 (cadrage), Souf
 
-**Ce qu'on a demande a l'IA.** [A COMPLETER PAR SOUF : ce que tu lui as demande pour
-rediger la premiere version du SPEC, et sous quelle forme.]
+**Ce qu'on a demande a l'IA.** De rediger une premiere version du SPEC.md a partir du
+scenario choisi (onboarding d'un nouveau collaborateur avec de vraies API), en incluant
+les user stories, le hors scope, les signatures d'outils et le happy path en 6 etapes.
 
-**Ce qu'elle a bien fait.** [A COMPLETER]
+**Ce qu'elle a bien fait.** Une structure complete et conforme aux attentes du palier des
+le premier jet : hors scope plus etoffe que le scope, signatures d'outils typees,
+section securite qui n'etait pas demandee explicitement mais collait au critere « esprit
+critique IA ».
 
-**Ce qu'on a refuse ou corrige.** [A COMPLETER]
+**Ce qu'on a refuse ou corrige.** Rien de majeur a la premiere version, mais on a
+retravaille ensemble le nom du projet (Alfred, puis Pennyworth) et adapte les exemples du
+happy path pour qu'ils collent exactement a notre scenario d'onboarding, plutot que de
+garder des exemples generiques.
 
 ---
 
@@ -103,10 +110,19 @@ ne reecrit pas un historique deja pousse quand on travaille a deux.
 
 ## Entree 4, palier 2 (socle), Souf
 
-**Ce que j'ai ecrit.** [A COMPLETER PAR SOUF : le schema SQL, le serveur, ce que tu as
-choisi et pourquoi. En particulier pourquoi tu avais separe une table `rollbacks`.]
+**Ce que j'ai ecrit.** Une premiere version du schema SQL (4 tables : plans, actions,
+audit_log, rollbacks) et un serveur FastAPI minimal (route POST /plans, initialisation
+de la base au demarrage). J'avais separe une table `rollbacks` distincte de `audit_log`
+pour garder une trace propre des annulations, separee de la trace d'execution -- mais on
+a garde la version d'Adam au final, qui range ca dans `audit_log` directement via un
+evenement de type annulation, plus simple et suffisant pour le besoin.
 
-**Ce que j'ai corrige ou refuse.** [A COMPLETER]
+**Ce que j'ai corrige ou refuse.** J'ai du resoudre un conflit git sur le README quand
+nos deux versions ont diverge (marqueurs `<<<<<<<` laisses par erreur avant que je les
+retire). J'ai aussi ecarte une premiere approche ou je cherchais a recuperer les mots de
+passe des paliers via l'inspecteur du navigateur, avant de comprendre que le contenu est
+chiffre cote serveur (AES-256-GCM) et que les mots de passe se donnent uniquement a
+l'oral -- pas une piste technique valable.
 
 ---
 
