@@ -117,12 +117,12 @@ pour garder une trace propre des annulations, separee de la trace d'execution --
 a garde la version d'Adam au final, qui range ca dans `audit_log` directement via un
 evenement de type annulation, plus simple et suffisant pour le besoin.
 
-**Ce que j'ai corrige ou refuse.** J'ai du resoudre un conflit git sur le README quand
-nos deux versions ont diverge (marqueurs `<<<<<<<` laisses par erreur avant que je les
-retire). J'ai aussi ecarte une premiere approche ou je cherchais a recuperer les mots de
-passe des paliers via l'inspecteur du navigateur, avant de comprendre que le contenu est
-chiffre cote serveur (AES-256-GCM) et que les mots de passe se donnent uniquement a
-l'oral -- pas une piste technique valable.
+**Ce que j'ai corrige ou refuse.** J'ai commite par erreur les marqueurs de conflit
+`<<<<<<<` sur le README sans les resoudre, lors d'un merge avec `dev`. Adam a fait la
+correction finale (commit 83e4f66). J'ai aussi ecarte une premiere approche ou je
+cherchais a recuperer les mots de passe des paliers via l'inspecteur du navigateur, avant
+de comprendre que le contenu est chiffre cote serveur (AES-256-GCM) et que les mots de
+passe se donnent uniquement a l'oral -- pas une piste technique valable.
 
 ---
 
