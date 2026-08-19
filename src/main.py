@@ -5,16 +5,19 @@ Une fois ce fichier ecrit, plus personne n'y touche : c'est le fichier le plus
 chaud du projet, et le geler evite les conflits git entre nous deux.
 """
 
+import hmac
 import json
+import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from anthropic import AuthenticationError
-from fastapi import FastAPI, HTTPException
+from anthropic import AnthropicError, AuthenticationError
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 load_dotenv()  # avant d'importer planner : il lit la cle dans l'environnement
 
@@ -32,17 +35,122 @@ async def cycle_de_vie(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Pennyworth", lifespan=cycle_de_vie)
+# docs_url/redoc_url/openapi_url a None : /docs, /redoc et /openapi.json
+# desactives. Sans ca, /openapi.json cartographie toute l'API (routes,
+# schemas, jusqu'aux noms de champs) pour n'importe qui sur Internet, sans
+# le moindre effort de decouverte. Personne ne consomme cette doc a part
+# nous deux pendant le dev ; en production elle ne sert qu'un attaquant.
+app = FastAPI(
+    title="Pennyworth",
+    lifespan=cycle_de_vie,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+
+# --- En-tetes de securite, sur toutes les reponses (API et front statique) ---
+#
+# CSP autorise 'unsafe-inline' sur script-src : le front est ecrit en JS
+# inline dans index.html/journal.html (choix assume du projet, pas de
+# bundler). Un CSP sans unsafe-inline casserait tout le JS de la page.
+# C'est une limite connue, pas un oubli : voir SECURITE.md. Le reste de la
+# politique reste strict (aucune origine externe non listee, aucun objet,
+# aucune iframe qui nous integre).
+EN_TETES_SECURITE = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "object-src 'none'"
+    ),
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    # Ignore par le navigateur si la reponse n'est pas recue en HTTPS (cas
+    # du dev local en http://127.0.0.1), donc sans danger en local.
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+}
+
+
+@app.middleware("http")
+async def ajouter_en_tetes_securite(request: Request, appel_suivant):
+    reponse = await appel_suivant(request)
+    for nom, valeur in EN_TETES_SECURITE.items():
+        reponse.headers[nom] = valeur
+    return reponse
+
+
+# --- Controle d'acces optionnel ---
+#
+# Desactive par defaut (APP_ACCESS_TOKEN absent de .env) : ne change RIEN
+# au comportement actuel tant qu'il n'est pas configure explicitement. Le
+# projet n'a pas d'authentification multi-utilisateur par choix assume
+# (SPEC.md, hors scope) ; ce jeton est une option supplementaire pour
+# durcir un deploiement public, pas un systeme de comptes. Voir
+# SECURITE.md pour ses limites actuelles (le front ne l'envoie pas encore).
+APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN")
+
+
+def verifier_acces(x_access_token: str = Header(default="")):
+    if not APP_ACCESS_TOKEN:
+        return
+    if not hmac.compare_digest(x_access_token, APP_ACCESS_TOKEN):
+        raise HTTPException(status_code=401, detail="Jeton d'acces invalide ou absent.")
+
+
+# --- Limite de debit, en memoire, par adresse IP ---
+#
+# Sans dependance externe : un seul processus uvicorn (voir lancer.sh),
+# pas besoin d'un service a part pour ca. Ne protege que les routes qui
+# coutent reellement (appel a Claude, effet de bord externe) : les routes
+# de lecture et le PATCH d'approbation restent libres, car un humain qui
+# valide plusieurs lignes d'un coup (le bouton "Executer les taches
+# cochees") envoie plusieurs PATCH en rafale en usage tout a fait normal,
+# et les brider casserait ce flux.
+_APPELS_PAR_IP: dict = {}
+FENETRE_SECONDES = 60
+MAX_APPELS_PAR_FENETRE = 20
+
+
+def limiter_debit(request: Request):
+    en_tete = request.headers.get("x-forwarded-for", "")
+    ip = en_tete.split(",")[0].strip() if en_tete else None
+    if not ip:
+        ip = request.client.host if request.client else "inconnu"
+
+    maintenant = time.monotonic()
+    horodatages = _APPELS_PAR_IP.setdefault(ip, [])
+    horodatages[:] = [h for h in horodatages if maintenant - h < FENETRE_SECONDES]
+
+    if len(horodatages) >= MAX_APPELS_PAR_FENETRE:
+        raise HTTPException(
+            status_code=429,
+            detail="Trop de requetes depuis cette adresse, reessayez dans une minute.",
+        )
+    horodatages.append(maintenant)
 
 
 class DemandeIntention(BaseModel):
-    """Ce que le front envoie : une phrase, rien d'autre."""
-    intention: str
+    """Ce que le front envoie : une phrase, rien d'autre.
+
+    max_length borne la taille de ce qui part dans le prompt : sans
+    limite, une intention enorme gonflerait le cout et la latence de
+    chaque appel a Claude pour rien, jusqu'a de vraies factures.
+    """
+    intention: str = Field(min_length=1, max_length=2000)
 
 
 class DemandeEtatAction(BaseModel):
     """Ce que le front envoie pour approuver ou refuser une action."""
-    etat: str
+    etat: str = Field(max_length=20)
 
 
 def _sse(evenement: dict) -> str:
@@ -63,12 +171,21 @@ def _flux(intention: str, plan_id: int, origine: str):
     text/event-stream) sont deja envoyes des le premier evenement. On les
     transforme donc en evenement `erreur`, que le front affiche dans sa
     carte d'erreur habituelle plutot que de lire le code HTTP.
+
+    Trois etages de filet, du plus precis au plus general, pour que ce
+    generateur ne meure JAMAIS sans avoir emis un evenement `fin` ou
+    `erreur` : une coupure reseau vers Anthropic (ou tout autre incident
+    cote SDK, timeout, quota, panne) doit se voir a l'ecran, pas laisser
+    le flux s'interrompre en silence avec un spinner fige.
     """
     try:
         for evenement in planner.planifier_stream(intention, plan_id, origine):
             if evenement["type"] == "fin":
                 db.enregistrer_reponse(plan_id, evenement["reponse"], evenement)
-                db.tracer(plan_id, "PLAN_PROPOSE", "AGENT")
+                db.tracer(
+                    plan_id, "PLAN_PROPOSE", "AGENT",
+                    json.dumps(evenement["trace"], ensure_ascii=False),
+                )
             yield _sse(evenement)
     except planner.CleManquante as manque:
         yield _sse({"type": "erreur", "message": str(manque)})
@@ -81,9 +198,21 @@ def _flux(intention: str, plan_id: int, origine: str):
                        "qu'elle est valide et a jour, en local (.env) "
                        "comme en production.",
         })
+    except AnthropicError as exc:
+        # Toute autre panne cote SDK Anthropic : coupure reseau, timeout,
+        # quota depasse, service indisponible. AuthenticationError est
+        # deja sorti par la clause precedente ; celle-ci couvre tout le
+        # reste (ex. APIConnectionError), jamais rattrape avant.
+        yield _sse({
+            "type": "erreur",
+            "message": f"Impossible de contacter Claude ({exc}). "
+                       "Verifiez la connexion reseau du serveur et reessayez.",
+        })
+    except Exception as exc:  # dernier filet : jamais de mort silencieuse
+        yield _sse({"type": "erreur", "message": f"Erreur inattendue : {exc}"})
 
 
-@app.post("/api/plans")
+@app.post("/api/plans", dependencies=[Depends(verifier_acces), Depends(limiter_debit)])
 def creer_plan(demande: DemandeIntention):
     """Recoit une intention, cree le plan, stream la proposition de Claude."""
     if not demande.intention.strip():
@@ -101,7 +230,10 @@ def creer_plan(demande: DemandeIntention):
     return StreamingResponse(flux_avec_debut(), media_type="text/event-stream")
 
 
-@app.post("/api/plans/{plan_id}/ajouter")
+@app.post(
+    "/api/plans/{plan_id}/ajouter",
+    dependencies=[Depends(verifier_acces), Depends(limiter_debit)],
+)
 def ajouter_au_plan(plan_id: int, demande: DemandeIntention):
     """La barre d'ajout : relance le MEME planificateur sur un plan existant.
 
@@ -121,7 +253,7 @@ def ajouter_au_plan(plan_id: int, demande: DemandeIntention):
     )
 
 
-@app.get("/api/plans/{plan_id}")
+@app.get("/api/plans/{plan_id}", dependencies=[Depends(verifier_acces)])
 def lire_plan(plan_id: int):
     """Relit un plan deja produit, avec ses actions.
 
@@ -138,7 +270,7 @@ def lire_plan(plan_id: int):
 ETATS_VALIDABLES = ("APPROUVEE", "REFUSEE")
 
 
-@app.patch("/api/actions/{action_id}")
+@app.patch("/api/actions/{action_id}", dependencies=[Depends(verifier_acces)])
 def valider_action(action_id: int, demande: DemandeEtatAction):
     """Approuve ou refuse une action, geste humain, jamais ecrit par l'agent.
 
@@ -196,7 +328,10 @@ def valider_action(action_id: int, demande: DemandeEtatAction):
     return db.lire_action(action_id)
 
 
-@app.post("/api/plans/{plan_id}/execute")
+@app.post(
+    "/api/plans/{plan_id}/execute",
+    dependencies=[Depends(verifier_acces), Depends(limiter_debit)],
+)
 def executer_plan(plan_id: int):
     """Execute uniquement les actions APPROUVEES du plan, dans l'ordre.
 
@@ -210,7 +345,7 @@ def executer_plan(plan_id: int):
     return {"plan_id": plan_id, "resultats": executor.executer_plan(plan_id)}
 
 
-@app.get("/api/plans/{plan_id}/audit")
+@app.get("/api/plans/{plan_id}/audit", dependencies=[Depends(verifier_acces)])
 def lire_journal(plan_id: int):
     """Le journal d'un plan : tout l'audit_log, y compris refus et
     blocages. Lu depuis la base a chaque appel, pour survivre a un
@@ -223,7 +358,10 @@ def lire_journal(plan_id: int):
     return {"plan_id": plan_id, "evenements": db.lister_audit(plan_id)}
 
 
-@app.post("/api/actions/{action_id}/compensate")
+@app.post(
+    "/api/actions/{action_id}/compensate",
+    dependencies=[Depends(verifier_acces), Depends(limiter_debit)],
+)
 def annuler_action(action_id: int):
     """Annule (compense) une action deja EXECUTEE, pour de vrai.
 
@@ -255,8 +393,11 @@ def annuler_action(action_id: int):
 
     resultat = executor.annuler_action(action)
     if not resultat.get("succes"):
+        # deja_traite : une autre requete a gagne la course (deux clics
+        # concurrents sur "Annuler", voir db.reserver_compensation). Ce
+        # n'est pas une panne du service, donc pas un 502.
         raise HTTPException(
-            status_code=502,
+            status_code=409 if resultat.get("deja_traite") else 502,
             detail=resultat.get("erreur", "Echec de l'annulation."),
         )
 
