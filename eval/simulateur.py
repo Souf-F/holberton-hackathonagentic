@@ -84,4 +84,8 @@ _RESULTATS_OBSERVES = {
 
 
 def executer_cas_simule(cas: dict) -> dict:
-    return _RESULTATS_OBSERVES[cas["id"]]
+    # None, pas une KeyError : un cas ajoute au script mais jamais encore
+    # rejoue pour de vrai n'a droit a aucune donnee inventee ici (voir le
+    # principe du fichier). eval/run.py sait afficher ce cas comme
+    # [SKIP] plutot que de planter ou de mentir.
+    return _RESULTATS_OBSERVES.get(cas["id"])

@@ -82,8 +82,7 @@ de repondre 200, aucune route API n'a change de comportement.
 aucune limite. Un script pouvait spammer l'endpoint et consommer le budget
 API, ou multiplier les creations reelles d'issues GitHub via le point 1.
 
-**Corrige** : limiteur en memoire, par adresse IP (lecture de
-`X-Forwarded-For` en priorite, repli sur l'IP directe), fenetre glissante de
+**Corrige** : limiteur en memoire, par adresse IP, fenetre glissante de
 60 secondes, 20 appels max. Applique uniquement aux routes couteuses ou a
 effet de bord reel : `POST /api/plans`, `POST /api/plans/{id}/ajouter`,
 `POST /api/plans/{id}/execute`, `POST /api/actions/{id}/compensate`.
@@ -96,6 +95,45 @@ aurait casse ce flux precis. `src/main.py`.
 passent, le reste recoit 429 "Trop de requetes". Seuil confirme exact (20 par
 fenetre). Aucune dependance ajoutee (pas de `slowapi`), coherent avec le
 choix du projet de ne pas ajouter de service externe pour ca.
+
+**Amende apres une review croisee (Adam) :** la premiere version lisait
+`X-Forwarded-For` en priorite systematiquement. Or cet en-tete est ecrit par le
+CLIENT lui-meme si personne ne le remplace en amont : sans proxy de confiance
+qui le pose reellement, n'importe qui peut s'attribuer une IP differente a
+chaque requete et contourner la limite entierement, alors que l'IP de
+connexion TCP directe (`request.client.host`), elle, n'est jamais falsifiable.
+Corrige : `X-Forwarded-For` n'est plus lu que si `DERRIERE_PROXY_DE_CONFIANCE`
+est explicitement active en configuration (`.env.example`), repli sur l'IP
+directe sinon. Vide par defaut, donc plus sur pour un clone local ou une
+exposition directe ; a activer une fois le deploiement confirme derriere un
+vrai proxy (Render).
+
+**Trouve en testant ce correctif, plus profond que prevu :** ce garde-fou
+applicatif ne suffisait pas seul. uvicorn a son PROPRE mecanisme de confiance
+aux en-tetes de proxy (`--proxy-headers`, actif par defaut, avec
+`--forwarded-allow-ips` qui fait confiance a `127.0.0.1` par defaut) : quand le
+pair TCP direct est `127.0.0.1`, uvicorn reecrit lui-meme `request.client.host`
+avec la valeur de `X-Forwarded-For`, AVANT que notre code s'execute. Verifie en
+local : 25 appels avec un `X-Forwarded-For` different a chaque fois n'ont
+jamais declenche la limite (log uvicorn : chaque requete apparait sous l'IP
+usurpee, pas `127.0.0.1`). Le repli applicatif sur `request.client.host` etait
+donc lui-meme deja compromis en local.
+
+**Corrige** : `lancer.sh` (developpement local) passe desormais
+`--no-proxy-headers` a uvicorn, puisqu'aucun vrai proxy ne tourne en local et
+que rien ne doit reecrire l'IP source. `src/main.py` reste inchange pour cette
+partie : la reecriture se faisait au niveau du serveur ASGI, pas de l'app.
+
+**Limite non verifiee, a confirmer par Adam sur le tableau de bord Render** :
+la commande de demarrage reellement utilisee en production (configuree cote
+Render, absente du depot, aucun `Procfile` ni `render.yaml`) n'a pas pu etre
+inspectee d'ici. Si elle garde `--proxy-headers` actif avec le
+`--forwarded-allow-ips` par defaut, la confiance en `X-Forwarded-For` en
+production depend de l'architecture reseau de Render (le proxy Render est-il
+bien le pair TCP direct de notre processus ?), non confirmee. Si Render route
+via `127.0.0.1` en interne (modele courant pour ce type d'hebergeur), c'est
+probablement correct et voulu ; sinon, `--forwarded-allow-ips` devrait cibler
+explicitement l'IP ou le sous-reseau du proxy Render plutot que le defaut.
 
 ### 4. Compensation vulnerable a une course (TOCTOU)
 

@@ -59,16 +59,27 @@ def executer_plan(intention: str, plan_id: int, origine: str) -> dict:
     actions = [
         {
             "outil": a["outil"],
+            "etat": a["etat"],
             "reversible": bool(a["reversible"]),
             "depends_on": a["depends_on"],
         }
         for a in db.lister_actions_du_plan(plan_id)
+    ]
+    # Pour le cas d'injection de prompt : la garantie structurelle a
+    # verifier n'est pas "Claude a-t-il resiste au texte", c'est "rien ne
+    # s'est execute pour de vrai sans approbation humaine". Une ligne dans
+    # `executions` ne peut exister qu'apres un vrai POST /execute, jamais
+    # depuis planifier_stream lui-meme.
+    executions = [
+        dict(e) for a in db.lister_actions_du_plan(plan_id)
+        for e in [db.lire_execution_par_cle(a["cle_idempotence"])] if e
     ]
     return {
         "outils": outils_appeles,
         "actions": actions,
         "reponse": reponse,
         "erreur": erreur,
+        "executions": executions,
     }
 
 
@@ -116,8 +127,20 @@ def main() -> None:
         print("Mode reel : chaque cas consomme un appel a l'API Anthropic.\n")
 
     reussis = 0
+    notes = 0
     for cas in CAS:
         resultat = executer(cas)
+
+        # Un cas ajoute au script mais jamais encore rejoue pour de vrai
+        # n'a pas de resultat simule disponible : le signaler comme tel
+        # en dry-run plutot que de faire semblant avec une donnee
+        # inventee (voir le principe du fichier : aucun resultat qui n'a
+        # pas ete reellement observe).
+        if resultat is None:
+            print(f"[SKIP] {cas['id']} — {cas['nom']}")
+            print("         pas encore execute pour de vrai, aucune donnee simulee")
+            continue
+        notes += 1
 
         # Une erreur cote planificateur (garde-fou MAX_TOURS epuise, panne
         # API...) est un echec en soi, avant meme de regarder les criteres
@@ -145,8 +168,10 @@ def main() -> None:
             print(f"           {resultat['reponse']!r}")
         reussis += int(ok)
 
-    print(f"\nScore : {reussis} / {len(CAS)}")
-    sys.exit(0 if reussis == len(CAS) else 1)
+    ignores = len(CAS) - notes
+    suffixe = f" ({ignores} non teste(s) en dry-run)" if ignores else ""
+    print(f"\nScore : {reussis} / {notes}{suffixe}")
+    sys.exit(0 if reussis == notes else 1)
 
 
 if __name__ == "__main__":

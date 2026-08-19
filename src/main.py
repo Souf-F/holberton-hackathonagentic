@@ -119,10 +119,26 @@ _APPELS_PAR_IP: dict = {}
 FENETRE_SECONDES = 60
 MAX_APPELS_PAR_FENETRE = 20
 
+# X-Forwarded-For n'est fiable que pose par un proxy de confiance (Render,
+# ou tout hebergeur qui le gere lui-meme) : un client qui parle directement
+# au serveur peut ecrire n'importe quelle valeur dans cet en-tete, et donc
+# se presenter sous une IP differente a chaque requete pour contourner la
+# limite de debit entierement. On ne le lit que si on sait explicitement
+# etre derriere un tel proxy ; sinon, repli sur l'IP de connexion reelle,
+# qui n'est jamais falsifiable par le client. Desactive par defaut : plus
+# sur pour un clone local ou une exposition directe, a activer seulement
+# une fois le deploiement confirme derriere un vrai proxy.
+DERRIERE_PROXY_DE_CONFIANCE = os.getenv("DERRIERE_PROXY_DE_CONFIANCE", "").lower() in (
+    "1", "true", "vrai", "oui",
+)
+
 
 def limiter_debit(request: Request):
-    en_tete = request.headers.get("x-forwarded-for", "")
-    ip = en_tete.split(",")[0].strip() if en_tete else None
+    ip = None
+    if DERRIERE_PROXY_DE_CONFIANCE:
+        en_tete = request.headers.get("x-forwarded-for", "")
+        if en_tete:
+            ip = en_tete.split(",")[0].strip()
     if not ip:
         ip = request.client.host if request.client else "inconnu"
 
