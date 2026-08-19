@@ -211,6 +211,7 @@ button:disabled { opacity: 0.5; cursor: wait; }
     border-left: 3px solid var(--accent);
     border-radius: 0.5rem;
     font-size: 0.8125rem;
+    animation: apparition 0.25s ease-out;
 }
 
 .appel-outil.en-erreur { border-left-color: var(--erreur); }
@@ -218,22 +219,64 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .appel-outil .ligne1 {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     gap: 0.5rem;
     font-weight: 600;
 }
 
+.appel-numero {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.05rem;
+    height: 1.05rem;
+    margin-right: 0.4rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--fond);
+    font-size: 0.625rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.appel-outil.en-erreur .appel-numero { background: var(--erreur); }
+
 .appel-outil .duree { font-weight: 400; color: var(--texte-doux); }
 
-.appel-outil .args,
-.appel-outil .resultat {
-    margin-top: 0.35rem;
+.resultat-etat {
+    font-weight: 600;
+    color: #1a7a3c;
+}
+
+.appel-outil.en-erreur .resultat-etat { color: var(--erreur); }
+
+/* Args et resultat : une petite grille cle/valeur, plus lisible qu'un
+   JSON.stringify brut sur une seule ligne. */
+.cle-valeurs {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.15rem 0.6rem;
+    margin: 0.35rem 0 0;
+}
+
+.cle-valeurs dt {
     color: var(--texte-doux);
+}
+
+.cle-valeurs dd {
+    margin: 0;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 0.75rem;
     overflow-wrap: anywhere;
+    color: var(--texte);
 }
 
-.appel-outil.en-erreur .resultat { color: var(--erreur); }
+.args-vide {
+    display: block;
+    margin-top: 0.35rem;
+    color: var(--texte-doux);
+    font-style: italic;
+}
 
 @media (max-width: 520px) {
     form { flex-direction: column; }
@@ -253,10 +296,31 @@ button:disabled { opacity: 0.5; cursor: wait; }
    gauche. */
 #ecran-plan h1 { margin-bottom: 0.5rem; }
 
+/* Meme langage visuel que le panneau debug et le journal : une petite
+   carte avec bordure d'accent a gauche et une etiquette discrete, plutot
+   qu'une phrase en italique entre guillemets flottant seule sous le titre. */
 .intention-affichee {
-    color: var(--texte-doux);
-    font-style: italic;
     margin: 0 0 1.25rem;
+    padding: 0.65rem 0.9rem;
+    background: var(--fond-carte);
+    border: 1px solid var(--bordure);
+    border-left: 3px solid var(--accent);
+    border-radius: 0.5rem;
+}
+
+.intention-etiquette {
+    display: block;
+    margin-bottom: 0.15rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--texte-doux);
+}
+
+.intention-texte {
+    margin: 0;
+    color: var(--texte);
 }
 
 .action {
@@ -338,12 +402,27 @@ button:disabled { opacity: 0.5; cursor: wait; }
 }
 
 .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     padding: 0.15rem 0.55rem;
     font-size: 0.75rem;
     border-radius: 1rem;
     background: var(--fond);
     border: 1px solid var(--bordure);
     color: var(--texte-doux);
+}
+
+/* Petit point discret devant chaque badge, dans la couleur du texte du
+   badge : ajoute du caractere sans ajouter une seule couleur de plus. */
+.badge::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.6;
+    flex-shrink: 0;
 }
 
 .badge-irreversible {
@@ -365,6 +444,54 @@ button:disabled { opacity: 0.5; cursor: wait; }
 
 .action.etat-refusee,
 .action.etat-bloquee { opacity: 0.6; }
+
+/* Bref halo autour d'une carte qui vient d'etre executee ou d'echouer,
+   pour que le regard s'y pose sans avoir a comparer avant/apres a la
+   main. S'estompe tout seul, ne laisse rien de permanent. */
+@keyframes halo-reussite {
+    from { box-shadow: 0 0 0 3px rgba(26, 122, 60, 0.25); }
+    to   { box-shadow: 0 0 0 3px rgba(26, 122, 60, 0); }
+}
+@keyframes halo-echec {
+    from { box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.25); }
+    to   { box-shadow: 0 0 0 3px rgba(192, 57, 43, 0); }
+}
+.action.vient-de-reussir { animation: halo-reussite 1.6s ease-out; }
+.action.vient-d-echouer { animation: halo-echec 1.6s ease-out; }
+
+/* --- Coche animee, message de fin d'execution --- */
+.carte-succes {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+}
+
+.carte-succes p { margin: 0; }
+
+.coche-animee { flex-shrink: 0; }
+
+.coche-cercle {
+    stroke: #1a7a3c;
+    stroke-width: 2;
+    fill: none;
+    stroke-dasharray: 151;
+    stroke-dashoffset: 151;
+    animation: dessiner-cercle 0.45s ease-out forwards;
+}
+
+.coche-trait {
+    stroke: #1a7a3c;
+    stroke-width: 3;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 40;
+    stroke-dashoffset: 40;
+    animation: dessiner-trait 0.3s ease-out 0.4s forwards;
+}
+
+@keyframes dessiner-cercle { to { stroke-dashoffset: 0; } }
+@keyframes dessiner-trait { to { stroke-dashoffset: 0; } }
 
 /* --- La barre d'ajout, sous la liste --- */
 
@@ -415,6 +542,11 @@ button:disabled { opacity: 0.5; cursor: wait; }
 }
 
 .evenement.en-erreur { border-left-color: var(--erreur); }
+.evenement.en-succes { border-left-color: #1a7a3c; }
+.evenement.en-compense {
+    border-left-color: var(--texte-doux);
+    border-left-style: dashed;
+}
 
 .evenement .ligne1 {
     display: flex;

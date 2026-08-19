@@ -32,7 +32,10 @@
         <button id="nouvelle-demande" type="button" class="lien-discret">
             Nouvelle demande
         </button>
-        <p class="intention-affichee" id="intention-affichee"></p>
+        <div class="intention-affichee" id="intention-affichee">
+            <span class="intention-etiquette">Demande</span>
+            <p class="intention-texte"></p>
+        </div>
 
         <div id="reponse-agent"></div>
         <div id="meta"></div>
@@ -193,7 +196,7 @@
         function afficherEcranPlan(intention) {
             ecranIntention.hidden = true;
             ecranPlan.hidden = false;
-            intentionAffichee.textContent = `« ${intention} »`;
+            intentionAffichee.querySelector(".intention-texte").textContent = intention;
             // planCourant est deja a jour a cet instant, que ce soit
             // depuis "debut" (streaming) ou chargerPlan (rechargement) :
             // les deux l'affectent avant d'appeler cette fonction.
@@ -407,6 +410,9 @@
         function construireLigneAction(action) {
             const ligne = document.createElement("div");
             ligne.className = "action etat-" + action.etat.toLowerCase();
+            // Sert a retrouver cette carte apres une execution, pour la
+            // mettre brievement en valeur (voir boutonExecuter plus bas).
+            ligne.dataset.actionId = action.id;
 
             const caseACocher = document.createElement("input");
             caseACocher.type = "checkbox";
@@ -536,33 +542,66 @@
 
         // --- Le panneau debug, rempli en direct pendant le streaming ---
 
+        // Affiche un objet {cle: valeur} en petite grille lisible, plutot
+        // qu'un JSON.stringify brut sur une seule ligne. Construit via le
+        // DOM (jamais innerHTML sur des valeurs qui viennent d'un outil ou
+        // de Claude) pour ne rien laisser echapper d'un contenu qu'on n'a
+        // pas ecrit nous-memes.
+        function remplirCleValeurs(dl, valeurs) {
+            dl.replaceChildren();
+            const entrees = valeurs && typeof valeurs === "object"
+                ? Object.entries(valeurs) : [];
+            if (!entrees.length) {
+                const vide = document.createElement("span");
+                vide.className = "args-vide";
+                vide.textContent = "(aucun argument)";
+                dl.appendChild(vide);
+                return;
+            }
+            for (const [cle, valeur] of entrees) {
+                const dt = document.createElement("dt");
+                dt.textContent = cle;
+                const dd = document.createElement("dd");
+                dd.textContent = typeof valeur === "object" && valeur !== null
+                    ? JSON.stringify(valeur) : String(valeur);
+                dl.append(dt, dd);
+            }
+        }
+
         // Cree une ligne "en cours" des que l'outil est demande, avant
-        // meme qu'on connaisse son resultat ou sa duree.
+        // meme qu'on connaisse son resultat ou sa duree. Numerotee dans
+        // l'ordre d'appel : ca donne a voir la sequence, pas juste un tas
+        // de cartes.
         function ajouterLigneDebug(outil, args, resultat) {
             const bloc = document.createElement("div");
             bloc.className = "appel-outil";
+
+            const numero = debugPlan.querySelectorAll(".appel-outil").length + 1;
 
             const ligne1 = document.createElement("div");
             ligne1.className = "ligne1";
             // outil vient du nom d'outil choisi par le modele : jamais
             // innerHTML sur cette valeur, meme si elle est censee rester
             // dans la liste des outils declares.
-            const spanOutil = document.createElement("span");
-            spanOutil.textContent = outil;
-            const spanDuree = document.createElement("span");
-            spanDuree.className = "duree";
-            spanDuree.textContent = "…";
-            ligne1.append(spanOutil, spanDuree);
+            const nom = document.createElement("span");
+            const badgeNumero = document.createElement("span");
+            badgeNumero.className = "appel-numero";
+            badgeNumero.textContent = String(numero);
+            nom.append(badgeNumero, document.createTextNode(outil));
+            const duree = document.createElement("span");
+            duree.className = "duree";
+            duree.textContent = "…";
+            ligne1.append(nom, duree);
 
-            const argsDiv = document.createElement("div");
-            argsDiv.className = "args";
-            argsDiv.textContent = "→ " + JSON.stringify(args);
+            const argsDl = document.createElement("dl");
+            argsDl.className = "cle-valeurs";
+            remplirCleValeurs(argsDl, args);
 
             const resultatDiv = document.createElement("div");
             resultatDiv.className = "resultat";
             resultatDiv.textContent = "en cours…";
 
-            bloc.append(ligne1, argsDiv, resultatDiv);
+            bloc.append(ligne1, argsDl, resultatDiv);
             debugPlan.appendChild(bloc);
             return bloc;
         }
@@ -571,9 +610,19 @@
         function remplirLigneDebug(bloc, evenementResultat) {
             if (evenementResultat.erreur) bloc.classList.add("en-erreur");
             bloc.querySelector(".duree").textContent = `${evenementResultat.duree_ms} ms`;
-            bloc.querySelector(".resultat").textContent =
-                (evenementResultat.erreur ? "✗ " : "✓ ") +
-                JSON.stringify(evenementResultat.resultat);
+
+            const resultatDiv = bloc.querySelector(".resultat");
+            resultatDiv.replaceChildren();
+
+            const etat = document.createElement("span");
+            etat.className = "resultat-etat";
+            etat.textContent = evenementResultat.erreur ? "échec" : "ok";
+            resultatDiv.appendChild(etat);
+
+            const resultatDl = document.createElement("dl");
+            resultatDl.className = "cle-valeurs";
+            remplirCleValeurs(resultatDl, evenementResultat.resultat);
+            resultatDiv.appendChild(resultatDl);
         }
 
         // Reconstruit le panneau debug d'un coup depuis une trace complete
@@ -663,9 +712,32 @@
                 }
                 const { resultats } = await executionReponse.json();
 
+                // Retient ce qui vient reellement de se passer (pas ce qui
+                // etait deja acquis avant ce clic : deja_execute rejoue un
+                // resultat memorise, ca ne merite pas la mise en valeur)
+                // pour le montrer sur les cartes une fois qu'elles seront
+                // redessinees juste apres.
+                const idsReussis = new Set();
+                const idsEchoues = new Set();
+                for (const r of resultats) {
+                    if (r.deja_execute) continue;
+                    if (r.etat === "EXECUTEE") idsReussis.add(r.action_id);
+                    else if (r.etat === "ECHOUEE") idsEchoues.add(r.action_id);
+                }
+
                 // On relit tout depuis la base : c'est la preuve que l'etat
                 // affiche n'est jamais invente cote navigateur.
                 await chargerPlan(planCourant);
+
+                for (const id of idsReussis) {
+                    const carte = listeActions.querySelector(`[data-action-id="${id}"]`);
+                    if (carte) carte.classList.add("vient-de-reussir");
+                }
+                for (const id of idsEchoues) {
+                    const carte = listeActions.querySelector(`[data-action-id="${id}"]`);
+                    if (carte) carte.classList.add("vient-d-echouer");
+                }
+
                 if (titresBloques.length) {
                     afficherCarteErreur(
                         messageExecution,
@@ -678,9 +750,18 @@
                     // comme si quelque chose venait vraiment de se passer.
                     messageExecution.innerHTML =
                         '<div class="carte">Rien à exécuter : aucune action approuvée en attente.</div>';
-                } else {
+                } else if (idsEchoues.size && !idsReussis.size) {
                     messageExecution.innerHTML =
-                        '<div class="carte">Exécution terminée. Voir le détail ci-dessus.</div>';
+                        '<div class="carte erreur"><pre>Exécution terminée, avec au moins un échec. Voir le détail ci-dessus.</pre></div>';
+                } else {
+                    messageExecution.innerHTML = `
+                        <div class="carte carte-succes">
+                            <svg class="coche-animee" viewBox="0 0 52 52" width="26" height="26" aria-hidden="true">
+                                <circle class="coche-cercle" cx="26" cy="26" r="24"/>
+                                <path class="coche-trait" d="M14 27l7 7 17-17"/>
+                            </svg>
+                            <p>Exécution terminée. Voir le détail ci-dessus.</p>
+                        </div>`;
                 }
             } catch (erreur) {
                 afficherCarteErreur(messageExecution, erreur.message);

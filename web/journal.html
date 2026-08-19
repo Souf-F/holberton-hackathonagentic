@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 <body class="avec-resultat">
+    <a id="lien-retour" class="lien-discret" href="/">← Retour au plan</a>
     <h1>Journal</h1>
 
     <div id="journal" class="journal"></div>
@@ -40,6 +41,22 @@
             carte.appendChild(pre);
             conteneur.replaceChildren(carte);
         }
+
+        // Noms d'evenements, en francais, pour l'affichage seulement. Le
+        // nom technique reste visible en infobulle (title) pour qui veut
+        // le terme exact du code, sans l'imposer a la lecture.
+        const LIBELLES_EVENEMENTS = {
+            PLAN_CREE: "Plan créé",
+            PLAN_PROPOSE: "Plan proposé",
+            ACTION_PROPOSEE: "Action proposée",
+            ACTION_APPROUVEE: "Action approuvée",
+            ACTION_REFUSEE: "Action refusée",
+            ACTION_BLOQUEE: "Action bloquée",
+            ACTION_EXECUTEE: "Action exécutée",
+            ACTION_ECHOUEE: "Échec d'exécution",
+            ACTION_COMPENSEE: "Action annulée",
+            ANNULATION_ECHOUEE: "Échec de l'annulation",
+        };
 
         chargerJournal();
 
@@ -120,16 +137,22 @@
 
             for (const evenement of evenements) {
                 const ligne = document.createElement("div");
-                ligne.className = "evenement" + (estEchec(evenement.evenement) ? " en-erreur" : "");
+                const classe = classePourEvenement(evenement.evenement);
+                ligne.className = "evenement" + (classe ? ` ${classe}` : "");
 
                 const ligne1 = document.createElement("div");
                 ligne1.className = "ligne1";
-                const spanEvenement = document.createElement("span");
-                spanEvenement.textContent = evenement.evenement;
-                const spanHorodatage = document.createElement("span");
-                spanHorodatage.className = "duree";
-                spanHorodatage.textContent = evenement.horodatage;
-                ligne1.append(spanEvenement, spanHorodatage);
+                const nom = document.createElement("span");
+                // textContent uniquement : le libelle vient d'une table
+                // fixe cote client, mais evenement.evenement (utilise en
+                // repli si absent de la table) vient du serveur, jamais
+                // via innerHTML.
+                nom.textContent = LIBELLES_EVENEMENTS[evenement.evenement] || evenement.evenement;
+                nom.title = evenement.evenement;
+                const duree = document.createElement("span");
+                duree.className = "duree";
+                duree.textContent = formaterHorodatage(evenement.horodatage);
+                ligne1.append(nom, duree);
 
                 const meta = document.createElement("div");
                 meta.className = "args";
@@ -174,15 +197,13 @@
                 // (voir db.tracer dans main.py) : un tableau JSON, pas un
                 // texte a afficher tel quel. Rendu comme le panneau debug de
                 // l'ecran du plan, replie par defaut pour ne pas noyer la
-                // chronologie. Les autres evenements gardent un simple
-                // texte.
+                // chronologie. Les autres evenements passent par
+                // afficherDetails (JSON objet -> grille cle/valeur, texte
+                // brut sinon).
                 if (evenement.evenement === "PLAN_PROPOSE" && evenement.details) {
                     ligne.appendChild(construireTraceRepliable(evenement.details));
                 } else if (evenement.details) {
-                    const details = document.createElement("div");
-                    details.className = "resultat";
-                    details.textContent = evenement.details;
-                    ligne.appendChild(details);
+                    ligne.appendChild(afficherDetails(evenement.details));
                 }
 
                 liste.appendChild(ligne);
@@ -216,38 +237,117 @@
                 : "Aucun outil appelé pour ce plan";
             details.appendChild(resume);
 
-            for (const entree of trace) {
+            trace.forEach((entree, index) => {
                 const bloc = document.createElement("div");
                 bloc.className = "appel-outil" + (entree.erreur ? " en-erreur" : "");
 
                 const ligne1 = document.createElement("div");
                 ligne1.className = "ligne1";
-                const spanOutil = document.createElement("span");
-                spanOutil.textContent = entree.outil;
-                const spanDuree = document.createElement("span");
-                spanDuree.className = "duree";
-                spanDuree.textContent = `${entree.duree_ms} ms`;
-                ligne1.append(spanOutil, spanDuree);
+                const nom = document.createElement("span");
+                const badgeNumero = document.createElement("span");
+                badgeNumero.className = "appel-numero";
+                badgeNumero.textContent = String(index + 1);
+                nom.append(badgeNumero, document.createTextNode(entree.outil));
+                const duree = document.createElement("span");
+                duree.className = "duree";
+                duree.textContent = `${entree.duree_ms} ms`;
+                ligne1.append(nom, duree);
 
-                const argsDiv = document.createElement("div");
-                argsDiv.className = "args";
-                argsDiv.textContent = "→ " + JSON.stringify(entree.arguments);
+                const argsDl = document.createElement("dl");
+                argsDl.className = "cle-valeurs";
+                remplirCleValeursJournal(argsDl, entree.arguments);
 
                 const resultatDiv = document.createElement("div");
-                resultatDiv.className = "resultat";
-                resultatDiv.textContent =
-                    (entree.erreur ? "✗ " : "✓ ") + JSON.stringify(entree.resultat);
+                const etat = document.createElement("span");
+                etat.className = "resultat-etat";
+                etat.textContent = entree.erreur ? "échec" : "ok";
+                const resultatDl = document.createElement("dl");
+                resultatDl.className = "cle-valeurs";
+                remplirCleValeursJournal(resultatDl, entree.resultat);
+                resultatDiv.append(etat, resultatDl);
 
-                bloc.append(ligne1, argsDiv, resultatDiv);
+                bloc.append(ligne1, argsDl, resultatDiv);
                 details.appendChild(bloc);
-            }
+            });
             return details;
         }
 
-        function estEchec(evenement) {
-            return evenement === "ACTION_REFUSEE" ||
-                   evenement === "ACTION_BLOQUEE" ||
-                   evenement === "ACTION_ECHOUEE";
+        // Meme logique que remplirCleValeurs sur l'ecran du plan (voir
+        // index.html) : une petite grille cle/valeur plutot qu'un
+        // JSON.stringify brut. Dupliquee ici faute de module JS partage
+        // entre les deux pages.
+        function remplirCleValeursJournal(dl, valeurs) {
+            const entrees = valeurs && typeof valeurs === "object"
+                ? Object.entries(valeurs) : [];
+            if (!entrees.length) {
+                const vide = document.createElement("span");
+                vide.className = "args-vide";
+                vide.textContent = "(aucun argument)";
+                dl.appendChild(vide);
+                return;
+            }
+            for (const [cle, valeur] of entrees) {
+                const dt = document.createElement("dt");
+                dt.textContent = cle;
+                const dd = document.createElement("dd");
+                dd.textContent = typeof valeur === "object" && valeur !== null
+                    ? JSON.stringify(valeur) : String(valeur);
+                dl.append(dt, dd);
+            }
+        }
+
+        // Beaucoup d'evenements ecrivent du JSON dans `details` (resultat
+        // d'execution, de compensation...), d'autres une phrase brute (le
+        // motif d'un blocage, par exemple). On affiche le premier cas en
+        // petite grille cle/valeur, plus lisible ; le second reste du
+        // texte simple, tel quel.
+        function afficherDetails(texte) {
+            let objet = null;
+            try {
+                const valeur = JSON.parse(texte);
+                if (valeur && typeof valeur === "object" && !Array.isArray(valeur)) {
+                    objet = valeur;
+                }
+            } catch {
+                // Pas du JSON : une phrase ecrite par le serveur, affichee
+                // telle quelle juste apres.
+            }
+
+            if (objet) {
+                const dl = document.createElement("dl");
+                dl.className = "cle-valeurs resultat";
+                remplirCleValeursJournal(dl, objet);
+                return dl;
+            }
+
+            const details = document.createElement("div");
+            details.className = "resultat";
+            details.textContent = texte;
+            return details;
+        }
+
+        function classePourEvenement(nom) {
+            if (
+                nom === "ACTION_REFUSEE" || nom === "ACTION_BLOQUEE" ||
+                nom === "ACTION_ECHOUEE" || nom === "ANNULATION_ECHOUEE"
+            ) {
+                return "en-erreur";
+            }
+            if (nom === "ACTION_EXECUTEE") return "en-succes";
+            if (nom === "ACTION_COMPENSEE") return "en-compense";
+            return "";
+        }
+
+        // L'horodatage vient du serveur au format ISO sans fuseau
+        // (heure locale du serveur, voir src/db.py) : new Date() le
+        // relit tel quel, sans conversion, ce qui est exactement ce
+        // qu'on veut ici.
+        function formaterHorodatage(iso) {
+            const date = new Date(iso);
+            if (Number.isNaN(date.getTime())) return iso;
+            const deux = (n) => String(n).padStart(2, "0");
+            return `${deux(date.getDate())}/${deux(date.getMonth() + 1)} ` +
+                   `${deux(date.getHours())}:${deux(date.getMinutes())}:${deux(date.getSeconds())}`;
         }
     </script>
 </body>
