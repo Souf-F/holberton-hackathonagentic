@@ -24,7 +24,11 @@ def executer(channel: str, text: str) -> dict:
     """Ecrit un message au format .eml dans outbox/.
 
     Ne leve jamais : un dossier non inscriptible doit remonter comme un
-    echec structure, pas faire planter l'executeur.
+    echec structure, pas faire planter l'executeur. Capture aussi
+    ValueError : EmailMessage refuse un retour a la ligne dans un
+    en-tete (ex. `channel` avec un \\r\\n glisse dedans, protection
+    anti-injection d'en-tete deja assuree par la bibliotheque standard),
+    et cette levee doit rester un echec propre, pas une exception brute.
     """
     try:
         DOSSIER_OUTBOX.mkdir(parents=True, exist_ok=True)
@@ -43,5 +47,5 @@ def executer(channel: str, text: str) -> dict:
         chemin.write_bytes(bytes(message))
 
         return {"succes": True, "message_id": identifiant, "chemin": str(chemin)}
-    except OSError as exc:
-        return {"succes": False, "erreur": f"Ecriture impossible dans outbox/ : {exc}"}
+    except (OSError, ValueError) as exc:
+        return {"succes": False, "erreur": f"Envoi impossible : {exc}"}
