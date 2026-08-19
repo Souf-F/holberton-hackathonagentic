@@ -198,10 +198,15 @@ fermee, verifiee a nouveau via l'API GitHub, pas juste en base chez nous.
 **Ce qu'on a refuse ou reporte.** L'ajout d'un outil de recherche d'equipe (l'annuaire ne
 cherche que par nom, pas par equipe) a ete identifie mais volontairement laisse de cote :
 le systeme degrade deja proprement dans ce cas (il le dit, ne devine pas), corriger
-n'etait pas urgent au regard du temps restant. On a aussi choisi, produit, de rediriger
-vers une nouvelle demande plutot que de laisser l'agent demander des precisions au fil de
-l'eau : plus simple a expliquer a l'oral, et ca evite un flux a deux vitesses (nouvelle
-demande vs complement) qu'on aurait du justifier.
+n'etait pas urgent au regard du temps restant. On a aussi tranche sur la gestion d'une
+info manquante, avec une regle plus fine qu'un simple oui/non : si une partie seulement
+de la demande manque d'info, l'agent propose quand meme tout ce qu'il peut avec
+`propose_action`, et demande le reste en texte, dans la meme conversation, pas de
+redirection. La redirection vers une toute nouvelle demande ne sert que le cas extreme,
+un plan tout neuf ou rien n'est proposable du tout : y ouvrir un dialogue de precisions
+reviendrait a faire discuter l'agent avec une case vide. Et un ajout via la barre
+d'ajout, lui, ne redirige jamais, meme s'il ne peut rien proposer cette fois : le plan
+existe deja, il ne doit pas repartir de zero pour une precision.
 
 **Ce qu'on retient.** Le happy path scripte etait vert du premier coup. La faille ne s'est
 vue qu'en essayant activement de le faire echouer, avec des donnees et un ordre de clics
