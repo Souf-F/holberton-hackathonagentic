@@ -93,7 +93,17 @@ def construire_gestionnaire(plan_id: int, origine: str = "AGENT"):
     HUMAIN quand l'action vient de la barre d'ajout (meme mecanique, un
     humain peut aussi "proposer" une action qui devra etre approuvee).
     """
-    compteur = {"position": len(db.lister_actions_du_plan(plan_id))}
+    actions_existantes = db.lister_actions_du_plan(plan_id)
+    # Traduit une position (1, 2, 3...), la seule chose que le modele
+    # connait et peut donner dans `depends_on` (voir SCHEMA plus haut), vers
+    # le vrai id en base qu'attend actions.depends_on (une reference a
+    # actions.id, colonne auto-incrementee et globale a toute la table, pas
+    # relative a un plan). Sans cette traduction, un plan dont ce n'est pas
+    # le tout premier de la base stockerait un depends_on qui pointe vers
+    # une action d'un plan totalement different (ou vers rien), et le
+    # blocage en cascade d'un refus ne trouverait jamais aucune dependante.
+    position_vers_id = {a["position"]: a["id"] for a in actions_existantes}
+    compteur = {"position": len(actions_existantes)}
 
     def executer(tool: str, args: dict, reason: str,
                  depends_on: Optional[int] = None) -> dict:
@@ -109,6 +119,12 @@ def construire_gestionnaire(plan_id: int, origine: str = "AGENT"):
         position = compteur["position"]
         cle = _cle_idempotence(plan_id, position, tool, args)
 
+        # Une position que le modele a inventee (ex. il annonce dependre de
+        # la position 4 qui n'existe pas encore) est ignoree plutot que
+        # stockee a tort : mieux vaut une action sans dependance affichee
+        # qu'une dependance vers la mauvaise action.
+        depends_on_id = position_vers_id.get(depends_on) if depends_on else None
+
         action_id = db.creer_action(
             plan_id=plan_id,
             position=position,
@@ -116,10 +132,11 @@ def construire_gestionnaire(plan_id: int, origine: str = "AGENT"):
             arguments=json.dumps(args, ensure_ascii=False),
             raison=reason,
             reversible=OUTILS_CONNUS[tool],
-            depends_on=depends_on,
+            depends_on=depends_on_id,
             origine=origine,
             cle_idempotence=cle,
         )
+        position_vers_id[position] = action_id
         db.tracer(plan_id, "ACTION_PROPOSEE", origine,
                   f"{tool} (position {position})")
 

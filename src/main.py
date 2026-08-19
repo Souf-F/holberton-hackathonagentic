@@ -20,6 +20,7 @@ load_dotenv()  # avant d'importer planner : il lit la cle dans l'environnement
 
 from src import db, planner  # noqa: E402
 from src.executeur import executor  # noqa: E402
+from src.executeur import handlers as executeur_handlers  # noqa: E402
 
 DOSSIER_WEB = Path(__file__).parent.parent / "web"
 
@@ -155,6 +156,24 @@ def valider_action(action_id: int, demande: DemandeEtatAction):
     if action is None:
         raise HTTPException(status_code=404, detail="Action introuvable.")
 
+    # Garde-fou structurel : une action bloquee en cascade (dependance
+    # refusee) ne peut pas etre re-approuvee par un appel PATCH suivant,
+    # meme si le navigateur l'envoie juste apres. Sans ce controle, la
+    # sequence "je refuse le parent, j'approuve l'enfant deja coche"
+    # (l'ordre exact dans lequel la barre d'execution envoie ses PATCH)
+    # effacerait silencieusement le blocage et executerait l'action pour
+    # de vrai. Verifie sur l'etat relu en base, jamais sur ce que le
+    # client pretend savoir.
+    if demande.etat == "APPROUVEE" and action["etat"] == "BLOQUEE":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Action bloquee : l'action dont elle depend a ete refusee. "
+                "Elle ne peut pas etre approuvee tant que ce refus n'est "
+                "pas revenu en arriere."
+            ),
+        )
+
     db.maj_etat_action(action_id, demande.etat)
     evenement = "ACTION_APPROUVEE" if demande.etat == "APPROUVEE" else "ACTION_REFUSEE"
     db.tracer(action["plan_id"], evenement, "HUMAIN", action_id=action_id)
@@ -206,9 +225,61 @@ def lire_journal(plan_id: int):
 
 @app.post("/api/actions/{action_id}/compensate")
 def annuler_action(action_id: int):
-    """Palier 5 : annuler une action deja executee."""
-    raise HTTPException(status_code=501, detail="Palier 5.")
+    """Annule (compense) une action deja EXECUTEE, pour de vrai.
+
+    Toute la validation est ici, avant d'appeler executor.annuler_action :
+    meme principe que valider_action plus haut, l'humain declenche, le
+    serveur garde le dernier mot sur ce qui est permis.
+    """
+    action = db.lire_action(action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Action introuvable.")
+
+    if action["etat"] != "EXECUTEE":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Seule une action EXECUTEE peut etre annulee "
+                f"(etat actuel : {action['etat']})."
+            ),
+        )
+
+    if action["outil"] not in executeur_handlers.ANNULATEURS:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Annulation non prise en charge pour l'outil "
+                f"{action['outil']}."
+            ),
+        )
+
+    resultat = executor.annuler_action(action)
+    if not resultat.get("succes"):
+        raise HTTPException(
+            status_code=502,
+            detail=resultat.get("erreur", "Echec de l'annulation."),
+        )
+
+    return db.lire_action(action_id)
+
+
+class StaticFilesSansCache(StaticFiles):
+    """Comme StaticFiles, mais force le navigateur a revalider a chaque
+    chargement plutot que de servir sa propre copie en cache.
+
+    Sans Cache-Control, le navigateur applique un cache "heuristique" et
+    un simple Cmd+R peut ne rien recharger du tout, meme apres une vraie
+    modification du fichier sur disque. `no-cache` ne desactive pas le
+    cache : il force juste une verification (ETag) a chaque fois, qui
+    renvoie un 304 si rien n'a change. Utile en dev, et raisonnable en
+    prod vu la frequence de nos redeploiements.
+    """
+
+    def file_response(self, *args, **kwargs):
+        reponse = super().file_response(*args, **kwargs)
+        reponse.headers["Cache-Control"] = "no-cache"
+        return reponse
 
 
 # Le front est servi par le meme serveur : une seule URL, pas de CORS a gerer.
-app.mount("/", StaticFiles(directory=DOSSIER_WEB, html=True), name="web")
+app.mount("/", StaticFilesSansCache(directory=DOSSIER_WEB, html=True), name="web")

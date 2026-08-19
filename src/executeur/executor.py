@@ -10,7 +10,7 @@ code.
 import json
 
 from src import db
-from src.executeur.handlers import HANDLERS
+from src.executeur.handlers import ANNULATEURS, HANDLERS
 
 
 def _executer_une_action(action: dict) -> dict:
@@ -65,6 +65,43 @@ def _executer_une_action(action: dict) -> dict:
         "etat": nouvel_etat,
         "resultat": resultat,
     }
+
+
+def annuler_action(action: dict) -> dict:
+    """Annule (compense) une action deja EXECUTEE, pour de vrai.
+
+    Ne fait aucune validation d'etat ou de compatibilite d'outil : c'est
+    a l'appelant (voir la route POST /api/actions/{id}/compensate dans
+    src/main.py) de garantir que l'action est bien EXECUTEE et que son
+    outil figure dans ANNULATEURS avant d'arriver ici, sur le meme
+    principe que executer_plan ne recoit que des actions APPROUVEES.
+    """
+    execution = db.lire_execution_par_cle(action["cle_idempotence"])
+    resultat_origine = (
+        json.loads(execution["resultat"])
+        if execution and execution["resultat"] else {}
+    )
+
+    annulateur = ANNULATEURS[action["outil"]]
+    resultat = annulateur(resultat_origine)
+
+    if resultat.get("succes"):
+        # COMPENSEE, jamais un retour a PROPOSEE ou un effacement : l'action
+        # EXECUTEE d'origine reste vraie, elle a juste ete annulee ensuite.
+        # L'audit_log garde les deux entrees (ACTION_EXECUTEE puis
+        # ACTION_COMPENSEE), append-only comme le reste de cette table.
+        db.maj_etat_action(action["id"], "COMPENSEE")
+        db.tracer(
+            action["plan_id"], "ACTION_COMPENSEE", "HUMAIN",
+            json.dumps(resultat, ensure_ascii=False), action_id=action["id"],
+        )
+    else:
+        db.tracer(
+            action["plan_id"], "ANNULATION_ECHOUEE", "HUMAIN",
+            json.dumps(resultat, ensure_ascii=False), action_id=action["id"],
+        )
+
+    return resultat
 
 
 def executer_plan(plan_id: int) -> list:
