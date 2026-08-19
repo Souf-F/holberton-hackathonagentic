@@ -108,7 +108,14 @@ Schema detaille, cycle de vie d'une action et signatures d'outils : voir [SPEC.m
 | Back | FastAPI, flux SSE |
 | Base | SQLite |
 | Front | HTML et JS vanilla |
-| Modele | Claude |
+| Modele | Claude (`ANTHROPIC_MODEL` dans `.env`) |
+
+**Convention sur le modele, adoptee pendant le durcissement :** Sonnet pour toutes les
+phases de test et d'iteration (moins cher), Opus reserve a la version officielle
+(checkpoint, demo). Toujours rejouer `make eval` sur Opus juste avant un checkpoint reel
+: un score obtenu sur Sonnet ne garantit pas le meme resultat sur Opus (verifie une fois
+en pratique, les deux ont pourtant echoue de la meme facon sur un defaut du script
+d'eval, pas du modele -- la prudence reste justifiee).
 
 Le raisonnement complet, et surtout **ce que nous avons ecarte et pourquoi**, sont dans la
 section "Choix techniques, et ce que nous avons ecarte" de [SPEC.md](./SPEC.md).
@@ -220,6 +227,19 @@ une dette cachee.
 - Operateur unique, pas de gestion de roles.
 - Pas d'annulation en cascade : annuler une action executee ne desannule pas
   automatiquement celles qui en dependaient.
+- `get_employee_info` cherche uniquement par nom, jamais par equipe : aucun moyen pour
+  l'agent de lister les membres d'une equipe sans en connaitre deja au moins un nom.
+  Verifie en pratique (nom invente + equipe invente) : l'agent le dit clairement et
+  degrade proprement plutot que d'inventer, mais ne peut pas resoudre la demande seul.
+- La limite de debit fait confiance a `X-Forwarded-For` uniquement si
+  `DERRIERE_PROXY_DE_CONFIANCE` est active. Trouve en testant : uvicorn a son PROPRE
+  mecanisme de confiance a cet en-tete (actif par defaut des que l'appelant direct est
+  `127.0.0.1`), qui reecrit l'IP avant meme que notre code s'execute. Neutralise en local
+  (`--no-proxy-headers` dans `lancer.sh`). **Non verifie en production** : la commande de
+  demarrage reelle sur Render n'est pas dans ce depot (configuree sur son tableau de
+  bord), donc si son architecture reseau fait bien de son proxy le pair TCP direct de
+  notre processus, tout va bien ; sinon, `--forwarded-allow-ips` merite d'etre precise
+  explicitement plutot que laisse par defaut.
 
 Liste complete des exclusions : section "Hors scope" de [SPEC.md](./SPEC.md).
 

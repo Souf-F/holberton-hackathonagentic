@@ -210,6 +210,70 @@ prepare a montrer.
 
 ---
 
-## Entree 7, palier 5 (durcissement)
+## Entree 7, palier 5 (durcissement), Adam
 
-> A ecrire mercredi matin.
+**Ce qu'on a demande a l'IA.** De reprendre chaque point du palier un par un, en direct,
+en cherchant a le casser plutot qu'a confirmer qu'il marche : erreurs visibles cote
+utilisateur, observabilite, eval automatisee, test qui a une vraie valeur, securite de
+base. Meme methode qu'au palier 4 : le happy path scripte ne suffit pas a savoir si un
+critere tient, seul un test adversarial le montre.
+
+**Ce qu'elle a trouve en cherchant vraiment a casser, pas en relisant.**
+- Le flux SSE n'avait aucun delai d'inactivite : une coupure reseau silencieuse (aucune
+  erreur, juste plus rien) laissait "Pennyworth reflechit" tourner indefiniment. Le vrai
+  spinner infini que le sujet interdit, le seul cas qu'aucun `try/catch` ne peut
+  rattraper. Corrige (45s, `Promise.race`), verifie avec un faux lecteur qui ne repond
+  jamais : declenchement exact a 45002ms.
+- Cinq chemins reseau sur sept affichaient "Failed to fetch", le message brut du
+  navigateur en anglais, au lieu d'une phrase comprehensible. Ca remplissait la lettre du
+  critere (visible) sans l'esprit (comprehensible). Trouve en simulant une panne sur
+  chacun des sept points d'entree, pas en supposant que "ca doit deja marcher".
+- Le badge "echec a l'execution" ne disait jamais pourquoi : il fallait ouvrir le journal
+  pour le savoir. Corrige en reutilisant l'audit deja charge par ailleurs, aucun appel
+  reseau de plus.
+- `AGENTS.md` etait reste un squelette du palier 1, jamais mis a jour : deux sections
+  disaient encore "a remplir au palier 3", et le tableau des outils listait
+  `list_team_members` et `get_onboarding_template`, deux outils jamais construits. Si le
+  formateur avait ouvert ce fichier pour verifier une reponse, il serait tombe sur du
+  faux.
+
+**La plus interessante : notre propre script d'eval s'est retourne contre nous, deux
+fois.** Premier tour : `eval/cases.py` annoncait 5/5 sans avoir jamais ete reellement
+rejoue par un script. Une fois `make eval` ecrit et lance pour de vrai, score reel :
+3/5, deux fois de suite, sur Sonnet ET sur Opus. Les deux modeles echouant pareil etait
+le signal : le probleme n'etait pas Claude, c'etaient nos criteres. Un cas exigeait un
+nombre precis d'actions, alors que Claude a une vraie liberte sur combien il en propose ;
+un autre partait d'un contexte de test trop pauvre pour que l'agent ait quoi que ce soit
+a continuer. Corriges, on repasse a 5/5 reel.
+
+Deuxieme tour, en verifiant que le cas "injection de prompt" repondait bien a la vraie
+question du checkpoint : il s'appuyait en fait sur le easter egg "sandwich", qu'on avait
+nous-memes ecrit dans le prompt comme une blague, pas sur "ignore tes instructions
+precedentes" (la phrase exacte du sujet). Ajoute un cas 6 avec la bonne phrase : 6/6,
+confirme par un vrai appel. Puis, en auditant le script lui-meme (meme reflexe que pour
+l'app), trouve qu'une vraie exception (pas un evenement `erreur` propre) faisait planter
+tout `make eval` d'un coup, sans le moindre score meme partiel. Corrige : chaque cas
+tourne dans son propre `try/except`, verifie en simulant une panne sur les 6 cas a la
+fois (score "0/6" proprement rapporte au lieu d'un crash).
+
+**Le travail de Souf, relu et corrige a deux endroits.** Sa revue de securite (27 points,
+`SECURITE.md`) est serieuse : IDOR corrige (jeton d'acces optionnel), course concurrente
+sur la compensation (TOCTOU) corrigee par un `UPDATE` atomique, documentation OpenAPI
+fermee. Deux choses ajustees apres coup : son cas de demo pour l'injection de prompt
+utilisait le easter egg sandwich (voir plus haut) ; et sa protection sur `X-Forwarded-For`
+ne suffisait pas seule, decouvert en la testant vraiment plutot qu'en la lisant : uvicorn
+a son PROPRE mecanisme de confiance a cet en-tete (actif par defaut des que l'appelant
+direct est `127.0.0.1`), qui reecrit l'IP AVANT meme que notre code s'execute. Verifie en
+local : 25 appels avec un en-tete usurpe contournaient la limite entierement avant le
+correctif (`--no-proxy-headers` sur `lancer.sh`), plus apres.
+
+**Ce qu'on a teste pour de vrai, pas en simulant.** Les deux scenarios du checkpoint
+("je coupe le reseau", "je vous fais mettre une fausse clef") joues en conditions
+reelles : une vraie fausse cle contre l'API Anthropic (rejetee avant toute facturation),
+une vraie tentative de connexion vers une adresse injoignable (`ANTHROPIC_BASE_URL`
+redirige). Les deux ont echoue proprement, avec un message clair, sans jamais boucler.
+
+**Ce qu'on retient.** Le meilleur reflexe de ce palier n'a pas ete d'ecrire du code, mais
+de douter systematiquement de ce qui semblait deja acquis (le score d'eval, la doc, la
+protection reseau de Souf) et de le reverifier en conditions reelles avant de le
+declarer bon. Deux fois sur trois, le doute etait fonde.
