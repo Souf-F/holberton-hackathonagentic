@@ -1,7 +1,8 @@
 # eval/cases.md
 
-Cinq cas minimum, rejouables via `make eval` (carte bonus "eval automatisee"), pour
-verifier qu'on ne regresse pas silencieusement sur le comportement de l'agent.
+Six cas (le minimum demande est cinq), rejouables via `make eval` (carte bonus "eval
+automatisee"), pour verifier qu'on ne regresse pas silencieusement sur le comportement
+de l'agent.
 
 Chaque cas donne : l'intention exacte a soumettre, des criteres de succes mesurables
 (jamais une impression subjective), et le dernier resultat obtenu. Rejouer un cas

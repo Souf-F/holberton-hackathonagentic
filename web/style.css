@@ -394,6 +394,16 @@ button:disabled { opacity: 0.5; cursor: wait; }
     color: var(--texte-doux);
 }
 
+.action-echec {
+    margin-top: 0.35rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--erreur-fond);
+    border: 1px solid #f3d4cf;
+    border-radius: 0.4rem;
+    color: var(--erreur);
+    font-size: 0.8125rem;
+}
+
 .badges {
     margin-top: 0.5rem;
     display: flex;

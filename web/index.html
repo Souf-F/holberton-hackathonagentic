@@ -187,10 +187,44 @@
                     if (derniereProposition) {
                         afficherTraceComplete(JSON.parse(derniereProposition.details));
                     }
+
+                    // Meme principe pour "pourquoi cette action a echoue" :
+                    // le badge "echec a l'execution" seul ne le dit pas, il
+                    // fallait ouvrir le journal pour le savoir. On reutilise
+                    // le meme audit deja recupere ci-dessus, aucun appel
+                    // reseau de plus.
+                    for (const evenement of audit.evenements) {
+                        if (evenement.evenement === "ACTION_ECHOUEE" && evenement.action_id) {
+                            afficherDetailEchec(evenement.action_id, evenement.details);
+                        }
+                    }
                 }
             } catch (erreur) {
                 console.warn("Trace non rechargee :", erreur);
             }
+        }
+
+        // Ajoute la raison exacte de l'echec directement sur la carte de
+        // l'action, plutot que de laisser le badge "echec a l'execution"
+        // seul, muet, obliger a ouvrir le journal pour savoir pourquoi.
+        function afficherDetailEchec(actionId, detailsJSON) {
+            const carte = listeActions.querySelector(`[data-action-id="${actionId}"]`);
+            if (!carte) return;
+            const contenu = carte.querySelector(".action-contenu");
+            if (!contenu || contenu.querySelector(".action-echec")) return;
+
+            let messageErreur = detailsJSON;
+            try {
+                const objet = JSON.parse(detailsJSON);
+                if (objet && objet.erreur) messageErreur = objet.erreur;
+            } catch {
+                // Pas du JSON : garde le texte brut tel quel.
+            }
+
+            const div = document.createElement("div");
+            div.className = "action-echec";
+            div.textContent = `Échec : ${messageErreur}`;
+            contenu.appendChild(div);
         }
 
         function afficherEcranPlan(intention) {

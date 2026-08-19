@@ -134,7 +134,21 @@ def main() -> None:
     reussis = 0
     notes = 0
     for cas in CAS:
-        resultat = executer(cas)
+        # Filet de dernier recours : une panne qui n'arrive PAS sous forme
+        # d'evenement `erreur` propre (une vraie exception Python non geree,
+        # ex. le SDK Anthropic qui leve autre chose que prevu) plantait tout
+        # le script d'un coup, sans le moindre score, meme partiel. Exactement
+        # le piege de l'etape 1 (ne jamais avaler une erreur en silence),
+        # applique dans l'autre sens : ici c'est l'ABSENCE de ce filet qui
+        # etait le probleme, un cas qui plante ne doit pas empecher de savoir
+        # ou en sont les 5 autres.
+        try:
+            resultat = executer(cas)
+        except Exception as exc:
+            print(f"[FAIL] {cas['id']} — {cas['nom']}")
+            print(f"         exception non geree : {type(exc).__name__}: {exc}")
+            notes += 1
+            continue
 
         # Un cas ajoute au script mais jamais encore rejoue pour de vrai
         # n'a pas de resultat simule disponible : le signaler comme tel
