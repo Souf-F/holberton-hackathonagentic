@@ -26,6 +26,11 @@ retravaille ensemble le nom du projet (Alfred, puis Pennyworth) et adapte les ex
 happy path pour qu'ils collent exactement a notre scenario d'onboarding, plutot que de
 garder des exemples generiques.
 
+**Ce qu'on retient.** Une structure correcte du premier coup ne veut pas dire un document
+fini : une IA peut proposer un plan bien range et rester generique dans le detail. Le
+travail qui restait, remplacer chaque exemple abstrait par notre propre cas (Jean, pas
+"un collaborateur"), est ce qui a rendu le SPEC vraiment nôtre plutot que juste correct.
+
 ---
 
 ## Entree 2, palier 1 (cadrage), Adam
@@ -113,8 +118,8 @@ ne reecrit pas un historique deja pousse quand on travaille a deux.
 **Ce que j'ai ecrit.** Une premiere version du schema SQL (4 tables : plans, actions,
 audit_log, rollbacks) et un serveur FastAPI minimal (route POST /plans, initialisation
 de la base au demarrage). J'avais separe une table `rollbacks` distincte de `audit_log`
-pour garder une trace propre des annulations, separee de la trace d'execution -- mais on
-a garde la version d'Adam au final, qui range ca dans `audit_log` directement via un
+pour garder une trace propre des annulations, separee de la trace d'execution. On a
+garde la version d'Adam au final, qui range ca dans `audit_log` directement via un
 evenement de type annulation, plus simple et suffisant pour le besoin.
 
 **Ce que j'ai corrige ou refuse.** J'ai commite par erreur les marqueurs de conflit
@@ -122,7 +127,13 @@ evenement de type annulation, plus simple et suffisant pour le besoin.
 correction finale (commit 83e4f66). J'ai aussi ecarte une premiere approche ou je
 cherchais a recuperer les mots de passe des paliers via l'inspecteur du navigateur, avant
 de comprendre que le contenu est chiffre cote serveur (AES-256-GCM) et que les mots de
-passe se donnent uniquement a l'oral -- pas une piste technique valable.
+passe se donnent uniquement a l'oral, pas une piste technique valable.
+
+**Ce qu'on retient.** Deux reflexes distincts, tous les deux utiles. Le premier :
+verifier qu'un merge est vraiment propre avant de le pousser, pas juste que git ne
+proteste pas, le README casse pour tout le monde sinon. Le second : reconnaitre quand un
+probleme n'en est pas un techniquement (le chiffrement cote serveur ferme la porte), et
+arreter d'y chercher une solution plutot que de s'entêter.
 
 ---
 
