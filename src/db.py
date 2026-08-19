@@ -3,6 +3,15 @@
 Un seul fichier, pas d'ORM : la partie critique du projet est une contrainte
 UNIQUE et une machine a etats. Les deux se lisent mieux en SQL brut, et
 s'expliquent mieux a l'oral.
+
+Injection SQL : chaque requete de ce fichier passe ses valeurs comme
+parametres (`?`), jamais par concatenation ou f-string dans le SQL
+lui-meme. sqlite3 les transmet au moteur separement du texte de la
+requete, qui ne peut donc jamais etre modifie par une valeur (une
+intention utilisateur, un nom d'outil...), meme malveillante. C'est une
+garantie structurelle : casser cette protection demanderait de
+construire une requete par concatenation quelque part dans ce fichier,
+ce qu'aucune fonction ci-dessous ne fait.
 """
 
 import os
@@ -178,6 +187,31 @@ def maj_etat_action(action_id: int, etat: str) -> None:
     tout etat qui ne serait pas dans la machine a etats."""
     with connexion() as conn:
         conn.execute("UPDATE actions SET etat = ? WHERE id = ?", (etat, action_id))
+
+
+def reserver_compensation(action_id: int) -> bool:
+    """Tente de gagner le droit de compenser cette action, atomiquement.
+
+    Meme logique que reserver_execution, mais sans table dediee : la
+    transition EXECUTEE -> COMPENSEE elle-meme sert de verrou, via un
+    UPDATE conditionne sur l'etat actuel. Si deux requetes /compensate
+    arrivent en meme temps sur la meme action, SQLite serialise les
+    ecritures : une seule des deux UPDATE peut trouver la ligne encore a
+    EXECUTEE, l'autre ne modifie rien (rowcount = 0). Renvoie True pour
+    celle qui a gagne, False pour l'autre (annulation deja en cours ou
+    action qui n'etait de toute facon plus EXECUTEE).
+
+    En cas d'echec de la compensation reelle apres coup, l'appelant doit
+    remettre l'etat a EXECUTEE (voir executor.annuler_action) : cette
+    fonction ne fait que reserver le droit d'essayer, pas confirmer le
+    resultat.
+    """
+    with connexion() as conn:
+        curseur = conn.execute(
+            "UPDATE actions SET etat = 'COMPENSEE' WHERE id = ? AND etat = 'EXECUTEE'",
+            (action_id,),
+        )
+        return curseur.rowcount > 0
 
 
 # --- Executions : la preuve, avec la garantie anti-doublon ---

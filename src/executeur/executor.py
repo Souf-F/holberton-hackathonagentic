@@ -75,7 +75,22 @@ def annuler_action(action: dict) -> dict:
     src/main.py) de garantir que l'action est bien EXECUTEE et que son
     outil figure dans ANNULATEURS avant d'arriver ici, sur le meme
     principe que executer_plan ne recoit que des actions APPROUVEES.
+
+    La reservation (db.reserver_compensation) est tentee AVANT d'appeler
+    l'annulateur reel, sur le meme principe que _executer_une_action pour
+    l'execution : deux clics concurrents sur "Annuler" ne peuvent pas
+    tous les deux fermer la meme issue GitHub, un seul gagne la
+    transition EXECUTEE -> COMPENSEE en base, l'autre est rejete avant
+    meme d'appeler l'API externe.
     """
+    if not db.reserver_compensation(action["id"]):
+        return {
+            "succes": False,
+            "deja_traite": True,
+            "erreur": "Cette action est deja en cours d'annulation ou n'est "
+                      "plus EXECUTEE (une autre requete est passee en premier).",
+        }
+
     execution = db.lire_execution_par_cle(action["cle_idempotence"])
     resultat_origine = (
         json.loads(execution["resultat"])
@@ -83,19 +98,25 @@ def annuler_action(action: dict) -> dict:
     )
 
     annulateur = ANNULATEURS[action["outil"]]
-    resultat = annulateur(resultat_origine)
+    try:
+        resultat = annulateur(resultat_origine)
+    except Exception as exc:  # meme garde-fou que _executer_une_action : un
+        # annulateur ne doit jamais faire tomber la route /compensate.
+        resultat = {"succes": False, "erreur": str(exc)}
 
     if resultat.get("succes"):
-        # COMPENSEE, jamais un retour a PROPOSEE ou un effacement : l'action
-        # EXECUTEE d'origine reste vraie, elle a juste ete annulee ensuite.
+        # L'etat est deja COMPENSEE (pose par la reservation ci-dessus).
         # L'audit_log garde les deux entrees (ACTION_EXECUTEE puis
         # ACTION_COMPENSEE), append-only comme le reste de cette table.
-        db.maj_etat_action(action["id"], "COMPENSEE")
         db.tracer(
             action["plan_id"], "ACTION_COMPENSEE", "HUMAIN",
             json.dumps(resultat, ensure_ascii=False), action_id=action["id"],
         )
     else:
+        # La reservation avait deja pose COMPENSEE en anticipant le succes :
+        # l'annulateur a echoue pour de vrai, on revient a EXECUTEE, l'etat
+        # qui reflete la realite (rien n'a ete annule).
+        db.maj_etat_action(action["id"], "EXECUTEE")
         db.tracer(
             action["plan_id"], "ANNULATION_ECHOUEE", "HUMAIN",
             json.dumps(resultat, ensure_ascii=False), action_id=action["id"],
