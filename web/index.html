@@ -203,27 +203,85 @@
             lienJournal.href = `/journal.html?plan_id=${planCourant}`;
         }
 
+        // Un fetch() qui echoue AVANT meme d'atteindre le serveur (reseau
+        // coupe, serveur eteint, DNS...) leve une TypeError dont le message
+        // brut ("Failed to fetch", "NetworkError...") est celui du
+        // navigateur, en anglais technique, pas comprehensible pour la
+        // plupart des utilisateurs. On le traduit ici en une phrase claire,
+        // la meme partout dans l'app (voir chargerPlan, qui l'utilisait
+        // deja avant que les autres appels ne soient alignes dessus). Les
+        // erreurs HTTP (reponse.ok === false) ne passent pas par ici :
+        // elles gardent le message du serveur, deja en francais et propre
+        // au cas (voir le code appelant, qui lit reponse.json().detail).
+        async function fetchAvecMessageClair(url, options) {
+            try {
+                return await fetch(url, options);
+            } catch (erreurReseau) {
+                throw new Error(
+                    "Impossible de contacter le serveur. Verifiez votre " +
+                    "connexion et reessayez."
+                );
+            }
+        }
+
         // --- Lecture d'un flux SSE : decoupe en evenements JSON un par un.
         // Carte bonus "streaming" : chaque evenement est traite des qu'il
         // arrive, pas apres que la reponse complete soit terminee.
+        // Delai d'inactivite : le seul cas de coupure reseau que ni le
+        // serveur ni un try/catch classique ne peuvent rattraper. Toutes
+        // les autres pannes (cle API absente, Anthropic injoignable,
+        // erreur cote SDK...) finissent par un evenement `erreur` explicite
+        // emis par src/main.py (_flux), qui remonte comme une exception
+        // normale plus bas dans la pile. Mais une coupure SILENCIEUSE entre
+        // le navigateur et notre serveur (paquets perdus sans RST, proxy
+        // qui coupe sans prevenir) ne fait ni erreur ni fin : lecteur.read()
+        // resterait juste en attente indefiniment, le vrai spinner infini
+        // que le sujet interdit. Reinitialise a chaque morceau recu : un
+        // echange long (plusieurs tours d'outils) qui progresse normalement
+        // n'est jamais coupe, seul un vrai silence prolonge l'est.
+        const DELAI_INACTIVITE_MS = 45000;
+
         async function* lireFluxSSE(reponse) {
             const lecteur = reponse.body.getReader();
             const decodeur = new TextDecoder();
             let tampon = "";
 
-            while (true) {
-                const { done, value } = await lecteur.read();
-                if (done) break;
-                tampon += decodeur.decode(value, { stream: true });
+            try {
+                while (true) {
+                    let minuteur;
+                    const attenteExpiree = new Promise((_, rejeter) => {
+                        minuteur = setTimeout(() => rejeter(new Error(
+                            "Aucune reponse du serveur depuis 45 secondes, " +
+                            "la connexion semble coupee. Rechargez la page " +
+                            "et reessayez."
+                        )), DELAI_INACTIVITE_MS);
+                    });
 
-                let indexSeparateur;
-                while ((indexSeparateur = tampon.indexOf("\n\n")) !== -1) {
-                    const bloc = tampon.slice(0, indexSeparateur);
-                    tampon = tampon.slice(indexSeparateur + 2);
-                    if (bloc.startsWith("data: ")) {
-                        yield JSON.parse(bloc.slice("data: ".length));
+                    let resultat;
+                    try {
+                        resultat = await Promise.race([lecteur.read(), attenteExpiree]);
+                    } finally {
+                        clearTimeout(minuteur);
+                    }
+
+                    const { done, value } = resultat;
+                    if (done) break;
+                    tampon += decodeur.decode(value, { stream: true });
+
+                    let indexSeparateur;
+                    while ((indexSeparateur = tampon.indexOf("\n\n")) !== -1) {
+                        const bloc = tampon.slice(0, indexSeparateur);
+                        tampon = tampon.slice(indexSeparateur + 2);
+                        if (bloc.startsWith("data: ")) {
+                            yield JSON.parse(bloc.slice("data: ".length));
+                        }
                     }
                 }
+            } finally {
+                // Que la boucle se termine normalement, sur une erreur, ou
+                // sur le timeout ci-dessus : ne jamais laisser la requete
+                // sous-jacente continuer a tourner en arriere-plan pour rien.
+                lecteur.cancel().catch(() => {});
             }
         }
 
@@ -232,7 +290,7 @@
         // l'URL et ce qui se passe sur l'evenement "debut" changent.
         async function envoyerEtStreamer(url, intentionTexte) {
             const debut = performance.now();
-            const reponse = await fetch(url, {
+            const reponse = await fetchAvecMessageClair(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ intention: intentionTexte }),
@@ -662,7 +720,7 @@
                 const approbations = cases.filter((c) => c.checked);
 
                 async function patcher(uneCase, etat) {
-                    const reponse = await fetch(
+                    const reponse = await fetchAvecMessageClair(
                         `/api/actions/${uneCase.dataset.actionId}`,
                         {
                             method: "PATCH",
@@ -702,7 +760,7 @@
                     }
                 }
 
-                const executionReponse = await fetch(
+                const executionReponse = await fetchAvecMessageClair(
                     `/api/plans/${planCourant}/execute`,
                     { method: "POST" }
                 );

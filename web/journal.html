@@ -58,6 +58,24 @@
             ANNULATION_ECHOUEE: "Échec de l'annulation",
         };
 
+        // Un fetch() qui echoue AVANT meme d'atteindre le serveur (reseau
+        // coupe, serveur eteint...) leve une TypeError dont le message brut
+        // ("Failed to fetch") est celui du navigateur, en anglais, pas
+        // comprehensible pour la plupart des utilisateurs. Traduit ici en
+        // une phrase claire, la meme que dans index.html. Les erreurs HTTP
+        // (reponse.ok === false) ne passent pas par ici : elles gardent le
+        // message du serveur, deja en francais.
+        async function fetchAvecMessageClair(url, options) {
+            try {
+                return await fetch(url, options);
+            } catch (erreurReseau) {
+                throw new Error(
+                    "Impossible de contacter le serveur. Verifiez votre " +
+                    "connexion et reessayez."
+                );
+            }
+        }
+
         chargerJournal();
 
         async function chargerJournal() {
@@ -76,8 +94,8 @@
                 // chronologie, et les actions pour savoir lesquelles sont
                 // encore EXECUTEE (et donc annulables) au moment present.
                 const [reponseAudit, reponsePlan] = await Promise.all([
-                    fetch(`/api/plans/${planId}/audit`),
-                    fetch(`/api/plans/${planId}`),
+                    fetchAvecMessageClair(`/api/plans/${planId}/audit`),
+                    fetchAvecMessageClair(`/api/plans/${planId}`),
                 ]);
                 if (!reponseAudit.ok) {
                     const erreur = await reponseAudit.json();
@@ -101,7 +119,7 @@
             bouton.disabled = true;
             bouton.textContent = "Annulation...";
             try {
-                const reponse = await fetch(`/api/actions/${actionId}/compensate`, {
+                const reponse = await fetchAvecMessageClair(`/api/actions/${actionId}/compensate`, {
                     method: "POST",
                 });
                 if (!reponse.ok) {
