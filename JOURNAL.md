@@ -126,15 +126,87 @@ passe se donnent uniquement a l'oral -- pas une piste technique valable.
 
 ---
 
-## Entree 5, palier 3 (premier outil)
+## Entree 5, palier 3 (premier outil), Adam
 
-> A ecrire mardi matin.
+**Ce qu'on a demande a l'IA.** Remplacer le plan en dur par un vrai dialogue avec des
+outils : `get_employee_info` et `read_calendar` en lecture seule, `propose_action` comme
+seule porte de sortie vers une action concrete, et le streaming SSE (carte bonus) pour
+afficher le plan pendant sa construction plutot qu'apres 30 secondes d'attente.
+
+**Ce qu'elle a bien fait.** La separation structurelle entre proposer et executer :
+`propose_action` ecrit une ligne en base, en etat `PROPOSEE`, et c'est tout. Aucun outil
+capable d'un vrai effet de bord n'est jamais donne au modele, ils vivent dans
+`src/executeur/`, un module que le planificateur n'importe meme pas. Ce n'est pas une
+regle de prompt qu'on espere voir respectee, c'est une impossibilite dans le code.
+
+**Ce qu'on a du corriger nous-memes.** Plusieurs erreurs concretes, pas de la
+mise au point :
+- `calendrier.py` de Souf contenait du JSON colle par erreur a la place d'un module
+  Python. Deplace en donnees dans `seed/calendrier.json`, module reecrit proprement.
+- `get_employee_info` ne renvoyait pas d'`id`, ce qui rendait `read_calendar` inutilisable
+  a la suite (aucun moyen de chainer les deux outils). Ajoute a toutes les fiches.
+- Les evenements calendrier de u004 a u006 manquaient, puis ont ete perdus une seconde
+  fois par une fusion qui a garde une version plus ancienne du fichier. Corrige deux fois,
+  avec un commit dedie la seconde.
+- Claude proposait `send_message` avec des noms de champs invente (`to`, `subject`) alors
+  que le handler de Souf attendait `channel`/`text`. On a ecrit noir sur blanc, dans le
+  prompt systeme, la signature exacte attendue par chaque outil : la description d'un
+  outil guide mieux le modele qu'une regle generale.
+- L'exemple central de notre propre SPEC (« Jean », le nouveau stagiaire sans fiche
+  existante) plantait : `create_employee_record` n'avait pas de handler cote executeur,
+  alors que c'est litteralement le cas qu'on met en avant dans le happy path. On l'a
+  construit, et fait fusionner les fiches creees en cours de route avec l'annuaire de
+  depart, sinon un collaborateur tout juste cree restait introuvable au tour suivant.
+
+**Ce qu'on retient.** Un contrat d'arguments implicite entre le modele et l'executeur ne
+tient pas : il faut l'ecrire explicitement, comme un type. Et le cas d'usage qu'on met en
+avant dans sa propre demo merite d'etre le premier qu'on teste, pas le dernier.
 
 ---
 
-## Entree 6, palier 4 (MVP)
+## Entree 6, palier 4 (MVP), Adam
 
-> A ecrire mardi soir.
+**Ce qu'on a demande a l'IA.** Un audit complet, contradictoire, du palier obligatoire :
+les 6 etapes du happy path de SPEC.md rejouees en direct dans le navigateur, avec des
+donnees differentes des notres a chaque fois, en cherchant explicitement a casser les
+garanties qu'on annonce plutot qu'a confirmer qu'elles marchent.
+
+**Ce qu'elle a trouve, et que la lecture du code seule n'aurait pas revele.** En testant
+le refus d'une action pendant que ses dependantes etaient cochees (exactement le
+scenario de demo prevu), les dependantes se sont **reellement executees** au lieu d'etre
+bloquees. Cause : `depends_on` est une position (1, 2, 3...) dans le contrat de l'outil
+`propose_action`, mais etait ecrite telle quelle dans une colonne qui attend l'identifiant
+reel en base, global a toute la table, pas relatif a un plan. Le blocage en cascade ne
+retrouvait quasiment jamais sa cible. Personne ne l'avait vu parce que le badge « bloquee »
+s'affichait quand meme correctement a l'ecran (lui se base sur la meme donnee, mais dans
+l'autre sens) : seul un test adversarial, pas une relecture, a mis le doigt dessus.
+
+Deux garde-fous ajoutes en consequence, pas un seul : la traduction position -> id a
+l'ecriture (`src/outils/proposer.py`), et un refus explicite (409) cote serveur si une
+action deja `BLOQUEE` est approuvee malgre tout (`src/main.py`), pour que meme un
+navigateur qui enverrait les requetes dans le mauvais ordre ne puisse pas contourner le
+blocage.
+
+**Ce qui manquait completement, pas juste bugue.** La compensation (etape 6 de notre
+propre happy path : annuler une action executee, fermer reellement l'issue GitHub cree,
+garder les deux entrees dans le journal sans rien effacer) etait un stub qui renvoyait
+501. On l'a construite dans la foulee : un `annuler()` par outil compensable (un seul
+pour l'instant, `create_github_issue`), une route qui verifie l'etat avant d'agir, un
+bouton dans `journal.html`. Testee sur une vraie issue de notre depot : creee, verifiee,
+fermee, verifiee a nouveau via l'API GitHub, pas juste en base chez nous.
+
+**Ce qu'on a refuse ou reporte.** L'ajout d'un outil de recherche d'equipe (l'annuaire ne
+cherche que par nom, pas par equipe) a ete identifie mais volontairement laisse de cote :
+le systeme degrade deja proprement dans ce cas (il le dit, ne devine pas), corriger
+n'etait pas urgent au regard du temps restant. On a aussi choisi, produit, de rediriger
+vers une nouvelle demande plutot que de laisser l'agent demander des precisions au fil de
+l'eau : plus simple a expliquer a l'oral, et ca evite un flux a deux vitesses (nouvelle
+demande vs complement) qu'on aurait du justifier.
+
+**Ce qu'on retient.** Le happy path scripte etait vert du premier coup. La faille ne s'est
+vue qu'en essayant activement de le faire echouer, avec des donnees et un ordre de clics
+qu'on n'avait pas prevus a l'avance. Tester ce qu'on annonce, pas seulement ce qu'on a
+prepare a montrer.
 
 ---
 
