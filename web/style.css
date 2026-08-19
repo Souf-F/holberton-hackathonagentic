@@ -106,12 +106,6 @@ button:disabled { opacity: 0.5; cursor: wait; }
     transform: translateY(0);
 }
 
-#resultat {
-    width: 100%;
-    max-width: 36rem;
-    margin-top: 1.75rem;
-}
-
 /* --- Attente : trois points qui pulsent, pendant que Claude reflechit --- */
 .attente {
     display: flex;
@@ -156,6 +150,15 @@ button:disabled { opacity: 0.5; cursor: wait; }
     line-height: 1.65;
     margin: 0;
 }
+
+.carte pre a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--bordure);
+    text-underline-offset: 0.15em;
+}
+
+.carte pre a:hover { text-decoration-color: var(--texte); }
 
 .carte.erreur {
     color: var(--erreur);
@@ -245,7 +248,10 @@ button:disabled { opacity: 0.5; cursor: wait; }
     max-width: 40rem;
 }
 
-#ecran-plan h1 { text-align: left; margin-bottom: 0.5rem; }
+/* Le titre reste centre sur cet ecran aussi (regle de base h1, non
+   ecrasee ici) : seul le reste du contenu suit le fil de lecture a
+   gauche. */
+#ecran-plan h1 { margin-bottom: 0.5rem; }
 
 .intention-affichee {
     color: var(--texte-doux);
@@ -266,16 +272,57 @@ button:disabled { opacity: 0.5; cursor: wait; }
 }
 
 .action input[type="checkbox"] {
+    /* Case dessinee entierement en CSS, pas la case native du systeme :
+       imposer une taille a une case native (via width/height seuls,
+       sans appearance:none) la deforme sur Safari, qui a une forme
+       interne fixe. On evite le probleme en ne dependant plus du tout
+       du rendu natif. */
+    appearance: none;
+    -webkit-appearance: none;
+    /* La regle "input" generique (champ de recherche) porte flex:1 et
+       du padding : sans les neutraliser ici, ils passent au travers et
+       etirent la case dans son conteneur flex. C'est ce qui produisait
+       la case a moitie remplie constatee a l'ecran. */
+    flex: none;
+    padding: 0;
     width: 1.15rem;
     height: 1.15rem;
-    margin-top: 0.2rem;
-    accent-color: var(--accent);
+    /* Alignee sur le haut du titre (line-height serre a 1.2 juste
+       au-dessus), pas sur le milieu de la ligne de texte par defaut. */
+    margin-top: 0.05rem;
     flex-shrink: 0;
+    border: 1.5px solid var(--bordure);
+    border-radius: 0.3rem;
+    background: var(--fond);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.action input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.action input[type="checkbox"]:checked::after {
+    content: "";
+    width: 0.3rem;
+    height: 0.55rem;
+    border: solid var(--fond);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -2px);
+}
+
+.action input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 .action-contenu { flex: 1; min-width: 0; }
 
-.action-titre { font-weight: 600; }
+.action-titre { font-weight: 600; line-height: 1.2; }
 
 .action-raison {
     margin-top: 0.25rem;
@@ -321,27 +368,17 @@ button:disabled { opacity: 0.5; cursor: wait; }
 
 /* --- La barre d'ajout, sous la liste --- */
 
+/* .barre-ajout est un <form> : son input et son bouton heritent deja des
+   regles de base (meme police, meme rembourrage, meme rayon, meme cible
+   tactile de 44px que la barre de recherche de l'ecran 1). On ne surcharge
+   que la largeur : la regle "form" generique plafonne a 36rem, pensee pour
+   l'ecran 1 (seul sur la page, plus etroit) ; ici la barre doit occuper
+   toute la largeur de #ecran-plan (40rem), comme les cartes d'actions et
+   le bouton executer au-dessus et en-dessous d'elle. Le media query
+   generique (form { flex-direction: column }) couvre deja le reste. */
 .barre-ajout {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1.25rem;
-}
-
-.barre-ajout input {
-    flex: 1;
-    min-width: 0;
-    padding: 0.7rem 1rem;
-    font-size: 0.9rem;
-    color: var(--texte);
-    background: var(--fond);
-    border: 1px dashed var(--bordure);
-    border-radius: 1.5rem;
-}
-
-.barre-ajout button {
-    padding: 0.7rem 1.1rem;
-    font-size: 0.9rem;
-    min-height: auto;
+    max-width: none;
+    margin-top: 1.5rem;
 }
 
 #bouton-executer {
@@ -353,11 +390,6 @@ button:disabled { opacity: 0.5; cursor: wait; }
 
 #message-execution:empty { margin: 0; }
 #message-execution { margin-top: 1rem; }
-
-@media (max-width: 520px) {
-    .barre-ajout { flex-direction: column; }
-    .barre-ajout button { width: 100%; }
-}
 
 /* --- Ecran du journal : le fil chronologique des evenements audit_log --- */
 .journal {
@@ -400,4 +432,35 @@ button:disabled { opacity: 0.5; cursor: wait; }
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 0.75rem;
     overflow-wrap: anywhere;
+}
+
+/* --- Bouton "Annuler" d'un evenement EXECUTEE compensable --- */
+.evenement .bouton-annuler {
+    display: block;
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.75rem;
+    min-height: auto;
+    border-radius: 1rem;
+}
+
+/* --- Le bouton "Nouvelle demande" : discret, en retrait, pas un
+   bouton d'action principal --- */
+.lien-discret {
+    display: block;
+    margin: 0 auto 0.75rem;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.8125rem;
+    color: var(--texte-doux);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 1rem;
+    min-height: auto;
+    text-align: center;
+}
+
+.lien-discret:hover {
+    color: var(--texte);
+    border-color: var(--bordure);
+    transform: none;
 }
