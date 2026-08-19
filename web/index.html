@@ -408,16 +408,26 @@
                 badges.appendChild(creerBadge("ajoutée par vous", ""));
             }
             if (action.etat === "BLOQUEE") {
-                badges.appendChild(creerBadge(
-                    `bloquée : dépend de l'action ${trouverPosition(action.depends_on)}`,
-                    "badge-bloquee"
-                ));
+                // Le parent direct ne suffit pas a expliquer "pourquoi" sur
+                // une cascade a plusieurs niveaux (A refusee, B bloquee,
+                // C bloquee parce que B l'est) : on remonte jusqu'a la
+                // vraie cause, l'action REFUSEE a l'origine, pas juste le
+                // premier maillon de la chaine.
+                const positionParent = trouverPosition(action.depends_on);
+                const racine = trouverCauseRacine(action.id);
+                const texte = racine && racine.id !== action.depends_on
+                    ? `bloquée : dépend de l'action ${positionParent} ` +
+                      `(refus d'origine : action ${racine.position})`
+                    : `bloquée : dépend de l'action ${positionParent}`;
+                badges.appendChild(creerBadge(texte, "badge-bloquee"));
             } else if (action.etat === "REFUSEE") {
                 badges.appendChild(creerBadge("refusée", "badge-bloquee"));
             } else if (action.etat === "EXECUTEE") {
                 badges.appendChild(creerBadge("exécutée", "badge-execute"));
             } else if (action.etat === "ECHOUEE") {
                 badges.appendChild(creerBadge("échec à l'exécution", "badge-irreversible"));
+            } else if (action.etat === "COMPENSEE") {
+                badges.appendChild(creerBadge("annulée (voir le journal)", "badge-bloquee"));
             } else if (action.depends_on) {
                 badges.appendChild(creerBadge(
                     `dépend de l'action ${trouverPosition(action.depends_on)}`,
@@ -448,6 +458,25 @@
         function trouverPosition(actionId) {
             const trouvee = actionsCourantes.find((a) => a.id === actionId);
             return trouvee ? trouvee.position : "?";
+        }
+
+        // Remonte la chaine de depends_on depuis une action bloquee jusqu'a
+        // trouver celle qui est REFUSEE, la vraie cause du blocage en
+        // cascade. `vues` protege contre un cycle dans les donnees (ne
+        // devrait jamais arriver, cote serveur c'est deja impossible, mais
+        // une boucle infinie cote navigateur serait pire qu'une protection
+        // en trop).
+        function trouverCauseRacine(actionId) {
+            const vues = new Set([actionId]);
+            let courante = actionsCourantes.find((a) => a.id === actionId);
+            while (courante && courante.depends_on && !vues.has(courante.depends_on)) {
+                const parent = actionsCourantes.find((a) => a.id === courante.depends_on);
+                if (!parent) return null;
+                if (parent.etat === "REFUSEE") return parent;
+                vues.add(parent.id);
+                courante = parent;
+            }
+            return null;
         }
 
         function creerBadge(texte, classeSupplementaire) {
