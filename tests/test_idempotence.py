@@ -38,7 +38,21 @@ def _creer_action_approuvee(plan_id: int, cle_idempotence: str) -> int:
 
 
 def test_reservation_refuse_le_doublon(base_de_test):
-    """La contrainte UNIQUE doit refuser une deuxieme reservation avec la meme cle."""
+    """La contrainte UNIQUE doit refuser une deuxieme reservation avec la meme cle.
+
+    C'est CE test-ci, pas le suivant, qui protege le vrai cas dangereux :
+    deux requetes HTTP simultanees (double-clic reel, pas un rechargement
+    sequentiel) peuvent toutes les deux lire l'action a l'etat APPROUVEE
+    avant qu'aucune des deux n'ait ecrit EXECUTEE (TOCTOU). Le filtre
+    `etat = APPROUVEE` de executer_plan (teste plus bas) ne protege que le
+    cas sequentiel, ou le premier appel a deja fini et change l'etat avant
+    que le second ne commence. Verifie en pratique : en cassant
+    volontairement reserver_execution (INSERT OR IGNORE au lieu du INSERT
+    protege par la contrainte UNIQUE), ce test echoue immediatement,
+    tandis que test_executer_plan_deux_fois_ne_double_pas continue de
+    passer sans rien remarquer, puisqu'il n'exerce jamais le chemin
+    concurrent.
+    """
     plan_id = base_de_test.creer_plan("[TEST] idempotence, reservation directe")
     action_id = _creer_action_approuvee(plan_id, "cle-test-reservation")
 
