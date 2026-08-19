@@ -57,14 +57,26 @@ ta reponse. N'invente jamais une information que tu n'as pas verifiee :
 un manager, un poste ou un evenement que tu n'as pas trouve doit rester
 absent de ta proposition, pas remplace par une supposition.
 
-Quand il te manque une information importante pour aller plus loin (le
-poste de quelqu'un, son manager, une date...), ne demande jamais a
-l'utilisateur de la donner en completement de cette demande-ci : dis-lui
-plutot, explicitement, de repartir d'une TOUTE NOUVELLE demande (le
-bouton "Nouvelle demande"), cette fois en donnant le maximum de details
-des le depart. Une demande recommencee avec tout le contexte d'un coup
-te permet de tout comprendre correctement, plutot que de reconstituer
-une situation par petits morceaux successifs.
+Si une information manque pour UNE PARTIE de la demande, ne bloque jamais
+tout le plan a cause de ca : propose quand meme, avec propose_action,
+toutes les actions que tu PEUX proposer correctement avec ce que tu sais
+deja, et dis simplement dans ta reponse en texte ce qu'il te manque pour
+la suite (ex. "je n'ai pas de canal pour prevenir l'equipe, precise-le").
+Une demande avec trois actions possibles sur quatre n'est pas un echec.
+
+Le cas ou tu ne peux VRAIMENT proposer AUCUNE action, sur aucune partie de
+la demande, est different et rare. Le message utilisateur te dit toujours
+si ce plan est tout neuf ou s'il contient deja des actions (barre
+d'ajout) :
+- Si le plan est tout neuf (son tout premier message) et que tu ne peux
+  rien proposer du tout, dis explicitement de repartir d'une TOUTE
+  NOUVELLE demande (bouton "Nouvelle demande"), avec le maximum de
+  details des le depart.
+- Si le plan contient deja des actions (ceci est un ajout via la barre
+  d'ajout), ne redirige JAMAIS vers une nouvelle demande, meme si tu ne
+  peux rien proposer cette fois : pose la question directement dans ta
+  reponse, l'utilisateur repondra juste en dessous, dans cette meme
+  barre. Le plan existe deja, il ne faut pas le faire recommencer.
 
 Une fois que tu as ce qu'il te faut, utilise l'outil propose_action UNE
 FOIS PAR ACTION concrete. N'ecris jamais les actions toi-meme sous forme
@@ -198,7 +210,17 @@ def planifier_stream(intention: str, plan_id: int, origine: str = "AGENT"):
     # argument.
     aujourdhui = f"Nous sommes le {date.today().isoformat()}."
     contexte = _resume_plan_existant(plan_id)
-    messages = [{"role": "user", "content": f"{aujourdhui}\n\n{contexte}{intention}"}]
+    # Signal explicite, pas laisse a deduire de la structure du texte : le
+    # prompt systeme s'appuie dessus pour savoir s'il a le droit de
+    # rediriger vers une nouvelle demande (uniquement si le plan est
+    # encore vide) ou non (des qu'il contient deja des actions, ajout via
+    # la barre d'ajout, ce plan ne doit jamais etre abandonne).
+    situation = (
+        "Ceci est un AJOUT a un plan deja en cours (barre d'ajout).\n\n"
+        if contexte else
+        "Ceci est le TOUT PREMIER message de ce plan, il est encore vide.\n\n"
+    )
+    messages = [{"role": "user", "content": f"{aujourdhui}\n\n{situation}{contexte}{intention}"}]
     trace = []
     texte_final = ""
     tokens_entree_total = 0

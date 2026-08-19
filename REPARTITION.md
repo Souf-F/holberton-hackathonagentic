@@ -164,22 +164,70 @@ Fusion, relecture croisée, entrées de journal.
 
 ## PALIER 5, DURCISSEMENT (J3 matin)
 
-### Adam
+**Mise a jour :** le sujet reel recu ce matin ne colle plus exactement a l'ancienne
+repartition ci-dessous (barree). Deux choses de l'ancien plan sont deja faites, en avance,
+dans la nuit du palier 4 : la compensation reelle des issues GitHub (`/compensate`,
+handler `annuler()`, bouton dans `journal.html`) et le cout/latence affiches par plan
+(badges `meta`). Ca vaut pour les deux : ce qui restait a faire de l'ancien plan est
+absorbe dans la repartition d'en dessous, pour que la charge reste equilibree malgre
+l'avance prise sur la partie de Souf.
+
+<details><summary>Ancienne repartition (en partie deja faite)</summary>
+
+### Adam (ancien plan)
 
 | # | Tâche |
 |---|---|
 | 1 | Harnais d'éval : 8 à 10 intentions, vérification automatique des actions attendues (carte bonus "éval automatisée") |
 | 2 | `AGENTS.md` complété : prompts système, traces, schéma de la boucle |
-| 3 | Le coût et la latence affichés dans l'interface (carte bonus "coût affiché") |
+| 3 | ~~Le coût et la latence affichés dans l'interface~~ **fait, palier 4** |
 
-### Souf
+### Souf (ancien plan)
 
 | # | Tâche |
 |---|---|
-| 1 | L'annulation avec compensation, et le cas irréversible géré proprement |
+| 1 | ~~L'annulation avec compensation, et le cas irréversible géré proprement~~ **fait, palier 4** |
 | 2 | `README.md` complet |
 | 3 | **Quickstart chronométré pour de vrai**, dans un dossier vide, sur une machine propre |
 | 4 | Section "limites connues" à jour (carte bonus "zéro dette expliquée") |
+
+</details>
+
+**Souf a demande a prendre la securite en entier**, plutot que la coupure historique
+executor/db/journal sur ce palier precis : ca lui donne un theme complet, testable et
+documentable de bout en bout, au lieu de taches eparpillees. Adam garde la resilience
+(erreurs reseau/API) et l'evaluation.
+
+### Adam : résilience et évaluation
+
+| # | Tâche | Fichier |
+|---|---|---|
+| 1 | **Priorité 1.** Coupure réseau ou erreur API (autre qu'une clé absente/refusée, déjà gérées) pendant le streaming : aujourd'hui ça peut planter en silence après l'ouverture du flux SSE et laisser "Pennyworth réfléchit" tourner indéfiniment. Rattraper large dans `_flux`, toujours renvoyer un évènement `erreur` explicite | `main.py` (`_flux`), `planner.py` |
+| 2 | `eval/cases.md` : 5 cas minimum, intention → résultat attendu → résultat obtenu, score actuel | `eval/cases.md` (nouveau) |
+| 3 | Carte bonus : script qui rejoue `eval/cases.md` et sort un score chiffré | `eval/run.py` ou équivalent (nouveau) |
+| 4 | Un test automatisé côté planificateur, sur un vrai bug trouvé cette nuit (la résolution `depends_on`, position → id, ou le respect de `MAX_TOURS`) | `tests/test_proposer.py` (nouveau) |
+| 5 | Observabilité côté écran du plan : vérifier qu'on répond à "pourquoi cette action" en moins de 30s (panneau "Voir les appels d'outils" déjà là ; compléter si un cas reste flou) | `web/index.html` |
+
+### Souf : sécurité, de bout en bout
+
+| # | Tâche | Fichier |
+|---|---|---|
+| 1 | **La question du checkpoint** : tester en direct "ignore tes instructions précédentes" dans le champ, observer ce que Claude fait réellement, documenter pourquoi le pire cas reste sans effet (`propose_action` n'écrit qu'une ligne `PROPOSEE`, rien ne s'exécute sans approbation humaine ET exécution séparée, l'exécuteur ne parle jamais au modèle) | `AGENTS.md` ou `SECURITY.md` (nouveau) |
+| 2 | Vérifier et documenter "aucune clé côté front" (déjà vrai, à confirmer comme réponse d'oral prête) | idem |
+| 3 | Limite de taille sur l'intention (texte énorme collé = équivalent du "fichier de 40 Mo" vu qu'il n'y a pas d'upload) | `main.py` (`DemandeIntention`) |
+| 4 | Vérifier l'échappement HTML partout où du texte utilisateur ou de Claude s'affiche (pas seulement l'endroit corrigé cette nuit dans `index.html`), y compris `journal.html` | `web/*.html` |
+| 5 | Confirmer la résistance à l'injection SQL : déjà garantie par les requêtes paramétrées de `db.py` (son fichier), documenter pourquoi plutôt que réécrire | `db.py` (lecture), doc |
+| 6 | Un test automatisé sur un mécanisme de sécurité/robustesse : l'idempotence (empêche un double effet de bord réel, double clic ou rejeu) ou le blocage en cascade | `tests/test_executor.py` (nouveau) |
+| 7 | Même filet que `create_github_issue.py` (qui capture déjà `RequestException`) sur les autres handlers si besoin | `handlers/*.py` |
+| 8 | `README.md`, quickstart chronométré, section "limites connues" (déjà prévu pour lui) | `README.md` |
+
+### Ensemble
+
+- `pytest` ajouté à `requirements.txt`
+- Piège du sujet a relire a deux avant l'oral : ne jamais avaler une exception en silence
+  pour "que ca ne plante plus" (deja notre reflexe partout ailleurs dans le code, sauf le
+  trou reseau du point 1 d'Adam)
+- Rituel de relecture croisée habituel avant le checkpoint
 
 ---
 

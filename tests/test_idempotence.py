@@ -2,25 +2,26 @@
 niveau (la reservation dans `executions`) jusqu'au plus haut
 (l'executeur complet, rejoue deux fois sur le meme plan).
 
-Autonome, sans pytest : `python3 tests/test_idempotence.py`. Utilise une
-base SQLite et un dossier outbox temporaires, jamais les vrais.
+Meme pattern que tests/test_proposer.py : fixture pytest avec base
+SQLite temporaire (tmp_path/monkeypatch), jamais data/pennyworth.db.
 """
 
-import os
-import shutil
-import sys
-import tempfile
-from pathlib import Path
+import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src import db
+from src.executeur import executor
+from src.executeur.handlers import send_message
 
-CHEMIN_BASE_TEMP = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
-DOSSIER_OUTBOX_TEMP = tempfile.mkdtemp()
-os.environ["DATABASE_PATH"] = CHEMIN_BASE_TEMP
-os.environ["OUTBOX_DIR"] = DOSSIER_OUTBOX_TEMP
 
-from src import db  # noqa: E402
-from src.executeur import executor  # noqa: E402
+@pytest.fixture
+def base_de_test(tmp_path, monkeypatch):
+    """Une base SQLite fraiche et isolee, et un outbox/ temporaire pour
+    que send_message (declenche par executer_plan) n'ecrive jamais dans
+    le vrai dossier outbox/ du depot."""
+    monkeypatch.setattr(db, "CHEMIN_BASE", tmp_path / "test_pennyworth.db")
+    monkeypatch.setattr(send_message, "DOSSIER_OUTBOX", tmp_path / "outbox")
+    db.initialiser()
+    yield db
 
 
 def _creer_action_approuvee(plan_id: int, cle_idempotence: str) -> int:
@@ -36,23 +37,22 @@ def _creer_action_approuvee(plan_id: int, cle_idempotence: str) -> int:
         ).lastrowid
 
 
-def test_reservation_refuse_le_doublon():
+def test_reservation_refuse_le_doublon(base_de_test):
     """La contrainte UNIQUE doit refuser une deuxieme reservation avec la meme cle."""
-    plan_id = db.creer_plan("[TEST] idempotence, reservation directe")
+    plan_id = base_de_test.creer_plan("[TEST] idempotence, reservation directe")
     action_id = _creer_action_approuvee(plan_id, "cle-test-reservation")
 
-    premiere = db.reserver_execution(action_id, "cle-test-reservation")
-    deuxieme = db.reserver_execution(action_id, "cle-test-reservation")
+    premiere = base_de_test.reserver_execution(action_id, "cle-test-reservation")
+    deuxieme = base_de_test.reserver_execution(action_id, "cle-test-reservation")
 
     assert premiere is not None, "la premiere reservation doit reussir"
     assert deuxieme is None, "la deuxieme reservation (meme cle) doit etre refusee"
-    print("OK : reserver_execution refuse un doublon de cle")
 
 
-def test_executer_plan_deux_fois_ne_double_pas():
+def test_executer_plan_deux_fois_ne_double_pas(base_de_test):
     """Rejouer executer_plan() sur le meme plan ne doit jamais creer une
     deuxieme ligne d'execution pour la meme action."""
-    plan_id = db.creer_plan("[TEST] idempotence, executeur complet")
+    plan_id = base_de_test.creer_plan("[TEST] idempotence, executeur complet")
     action_id = _creer_action_approuvee(plan_id, "cle-test-executeur")
 
     premiers_resultats = executor.executer_plan(plan_id)
@@ -67,20 +67,8 @@ def test_executer_plan_deux_fois_ne_double_pas():
         "n'est plus APPROUVEE, elle est deja EXECUTEE"
     )
 
-    with db.connexion() as conn:
+    with base_de_test.connexion() as conn:
         nb_executions = conn.execute(
             "SELECT COUNT(*) FROM executions WHERE action_id = ?", (action_id,)
         ).fetchone()[0]
     assert nb_executions == 1, "une seule ligne d'execution, jamais deux"
-    print("OK : executer_plan() rejoue ne cree jamais une deuxieme execution")
-
-
-if __name__ == "__main__":
-    db.initialiser()
-    try:
-        test_reservation_refuse_le_doublon()
-        test_executer_plan_deux_fois_ne_double_pas()
-        print("\nTous les tests d'idempotence passent.")
-    finally:
-        os.unlink(CHEMIN_BASE_TEMP)
-        shutil.rmtree(DOSSIER_OUTBOX_TEMP, ignore_errors=True)
