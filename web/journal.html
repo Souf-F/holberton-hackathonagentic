@@ -29,13 +29,25 @@
         // aurait oublie d'ajouter ici echouerait juste proprement en 409.
         const OUTILS_ANNULABLES = new Set(["create_github_issue"]);
 
+        // Une seule fonction pour toutes les cartes d'erreur : construite
+        // avec textContent (jamais innerHTML), donc jamais de risque
+        // d'injection HTML.
+        function afficherCarteErreur(message) {
+            const carte = document.createElement("div");
+            carte.className = "carte erreur";
+            const pre = document.createElement("pre");
+            pre.textContent = message;
+            carte.appendChild(pre);
+            conteneur.replaceChildren(carte);
+        }
+
         chargerJournal();
 
         async function chargerJournal() {
             if (!planId) {
-                conteneur.innerHTML =
-                    `<div class="carte erreur"><pre>Aucun plan_id dans l'URL. ` +
-                    `Exemple : journal.html?plan_id=1</pre></div>`;
+                afficherCarteErreur(
+                    "Aucun plan_id dans l'URL. Exemple : journal.html?plan_id=1"
+                );
                 return;
             }
 
@@ -64,8 +76,7 @@
                 }
                 afficher(donnees.evenements, actionsParId);
             } catch (erreur) {
-                conteneur.innerHTML =
-                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+                afficherCarteErreur(erreur.message);
             }
         }
 
@@ -113,9 +124,12 @@
 
                 const ligne1 = document.createElement("div");
                 ligne1.className = "ligne1";
-                ligne1.innerHTML =
-                    `<span>${evenement.evenement}</span>` +
-                    `<span class="duree">${evenement.horodatage}</span>`;
+                const spanEvenement = document.createElement("span");
+                spanEvenement.textContent = evenement.evenement;
+                const spanHorodatage = document.createElement("span");
+                spanHorodatage.className = "duree";
+                spanHorodatage.textContent = evenement.horodatage;
+                ligne1.append(spanEvenement, spanHorodatage);
 
                 const meta = document.createElement("div");
                 meta.className = "args";
@@ -125,11 +139,22 @@
 
                 ligne.append(ligne1, meta);
 
+                // La raison invoquee par l'agent (ou l'humain, via la barre
+                // d'ajout) pour cette action precise : c'est la reponse la
+                // plus directe a "pourquoi l'agent a fait ca", affichee ici
+                // pour ne pas obliger a retourner sur l'ecran du plan.
+                const action = actionsParId[evenement.action_id];
+                if (action && action.raison) {
+                    const raison = document.createElement("div");
+                    raison.className = "args";
+                    raison.textContent = `raison : ${action.raison}`;
+                    ligne.appendChild(raison);
+                }
+
                 // Un bouton "Annuler" seulement sur l'evenement EXECUTEE
                 // d'une action qui l'est encore (pas deja compensee par un
                 // clic precedent, pas rechargee entre-temps dans un autre
                 // onglet) et dont l'outil sait vraiment s'annuler.
-                const action = actionsParId[evenement.action_id];
                 if (
                     evenement.evenement === "ACTION_EXECUTEE" &&
                     action && action.etat === "EXECUTEE" &&
@@ -145,7 +170,15 @@
                     ligne.appendChild(boutonAnnuler);
                 }
 
-                if (evenement.details) {
+                // PLAN_PROPOSE porte la trace complete des outils consultes
+                // (voir db.tracer dans main.py) : un tableau JSON, pas un
+                // texte a afficher tel quel. Rendu comme le panneau debug de
+                // l'ecran du plan, replie par defaut pour ne pas noyer la
+                // chronologie. Les autres evenements gardent un simple
+                // texte.
+                if (evenement.evenement === "PLAN_PROPOSE" && evenement.details) {
+                    ligne.appendChild(construireTraceRepliable(evenement.details));
+                } else if (evenement.details) {
                     const details = document.createElement("div");
                     details.className = "resultat";
                     details.textContent = evenement.details;
@@ -156,6 +189,59 @@
             }
 
             conteneur.replaceChildren(entete, liste);
+        }
+
+        // Construit le meme panneau "appels d'outils" replie que celui de
+        // l'ecran du plan (memes classes CSS : .debug/.appel-outil/...),
+        // a partir de la trace JSON stockee dans PLAN_PROPOSE.details.
+        function construireTraceRepliable(detailsJSON) {
+            let trace;
+            try {
+                trace = JSON.parse(detailsJSON);
+            } catch (erreur) {
+                // Trace corrompue ou absente (anciennes lignes d'avant ce
+                // correctif) : on l'affiche comme du texte brut plutot que
+                // de la faire disparaitre en silence.
+                const brut = document.createElement("div");
+                brut.className = "resultat";
+                brut.textContent = detailsJSON;
+                return brut;
+            }
+
+            const details = document.createElement("details");
+            details.className = "debug";
+            const resume = document.createElement("summary");
+            resume.textContent = trace.length
+                ? `Voir les appels d'outils (${trace.length})`
+                : "Aucun outil appelé pour ce plan";
+            details.appendChild(resume);
+
+            for (const entree of trace) {
+                const bloc = document.createElement("div");
+                bloc.className = "appel-outil" + (entree.erreur ? " en-erreur" : "");
+
+                const ligne1 = document.createElement("div");
+                ligne1.className = "ligne1";
+                const spanOutil = document.createElement("span");
+                spanOutil.textContent = entree.outil;
+                const spanDuree = document.createElement("span");
+                spanDuree.className = "duree";
+                spanDuree.textContent = `${entree.duree_ms} ms`;
+                ligne1.append(spanOutil, spanDuree);
+
+                const argsDiv = document.createElement("div");
+                argsDiv.className = "args";
+                argsDiv.textContent = "→ " + JSON.stringify(entree.arguments);
+
+                const resultatDiv = document.createElement("div");
+                resultatDiv.className = "resultat";
+                resultatDiv.textContent =
+                    (entree.erreur ? "✗ " : "✓ ") + JSON.stringify(entree.resultat);
+
+                bloc.append(ligne1, argsDiv, resultatDiv);
+                details.appendChild(bloc);
+            }
+            return details;
         }
 
         function estEchec(evenement) {

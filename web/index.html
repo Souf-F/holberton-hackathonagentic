@@ -125,7 +125,21 @@
         });
 
         async function chargerPlan(planId) {
-            const reponse = await fetch(`/api/plans/${planId}`);
+            let reponse;
+            try {
+                reponse = await fetch(`/api/plans/${planId}`);
+            } catch (erreur) {
+                // Le reseau est coupe (ou le serveur injoignable) au moment
+                // ou la page charge un plan memorise : sans ce filet, la
+                // page restait muette, sans jamais dire ce qui s'est passe.
+                ecranIntention.hidden = true;
+                ecranPlan.hidden = false;
+                afficherCarteErreur(
+                    reponseAgent,
+                    "Impossible de contacter le serveur. Verifiez votre connexion et rechargez la page."
+                );
+                return;
+            }
             if (!reponse.ok) {
                 // Le plan memorise n'existe plus : on repart de l'ecran 1
                 // plutot que d'afficher une erreur bloquante.
@@ -152,6 +166,28 @@
                 rendreMeta(donnees);
             }
             rendreActions();
+
+            // Observabilite : sans ca, le panneau debug (pourquoi l'agent a
+            // fait ca) restait vide apres un rechargement de page, alors
+            // que la trace du dernier echange est bien en base (voir
+            // db.tracer dans main.py). On la relit et on la reaffiche telle
+            // quelle. Best-effort : si ca echoue, le reste de la page (deja
+            // affiche ci-dessus) reste utilisable, seul le panneau debug
+            // reste vide comme avant ce correctif.
+            try {
+                const reponseAudit = await fetch(`/api/plans/${planId}/audit`);
+                if (reponseAudit.ok) {
+                    const audit = await reponseAudit.json();
+                    const derniereProposition = [...audit.evenements]
+                        .reverse()
+                        .find((e) => e.evenement === "PLAN_PROPOSE" && e.details);
+                    if (derniereProposition) {
+                        afficherTraceComplete(JSON.parse(derniereProposition.details));
+                    }
+                }
+            } catch (erreur) {
+                console.warn("Trace non rechargee :", erreur);
+            }
         }
 
         function afficherEcranPlan(intention) {
@@ -321,8 +357,7 @@
             } catch (erreur) {
                 ecranIntention.hidden = true;
                 ecranPlan.hidden = false;
-                reponseAgent.innerHTML =
-                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+                afficherCarteErreur(reponseAgent, erreur.message);
             } finally {
                 bouton.disabled = false;
             }
@@ -336,8 +371,7 @@
             try {
                 await envoyerEtStreamer(`/api/plans/${planCourant}/ajouter`, texte);
             } catch (erreur) {
-                messageExecution.innerHTML =
-                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+                afficherCarteErreur(messageExecution, erreur.message);
             } finally {
                 boutonADesactiver.disabled = false;
             }
@@ -430,6 +464,20 @@
             return ligne;
         }
 
+        // Une seule fonction pour toutes les cartes d'erreur : construite
+        // avec textContent (jamais innerHTML), donc jamais de risque
+        // d'injection HTML, meme si le message vient un jour a contenir du
+        // texte que le serveur a lui-meme recopie depuis l'exterieur (une
+        // erreur d'API GitHub, par exemple).
+        function afficherCarteErreur(conteneur, message) {
+            const carte = document.createElement("div");
+            carte.className = "carte erreur";
+            const pre = document.createElement("pre");
+            pre.textContent = message;
+            carte.appendChild(pre);
+            conteneur.replaceChildren(carte);
+        }
+
         // Le texte de Claude peut contenir de vraies URLs (l'issue GitHub
         // qu'il vient de creer, par exemple) : affiche en <pre>/textContent
         // pur, une URL n'est jamais cliquable. On echappe le texte a la
@@ -467,7 +515,15 @@
 
             const ligne1 = document.createElement("div");
             ligne1.className = "ligne1";
-            ligne1.innerHTML = `<span>${outil}</span><span class="duree">…</span>`;
+            // outil vient du nom d'outil choisi par le modele : jamais
+            // innerHTML sur cette valeur, meme si elle est censee rester
+            // dans la liste des outils declares.
+            const spanOutil = document.createElement("span");
+            spanOutil.textContent = outil;
+            const spanDuree = document.createElement("span");
+            spanDuree.className = "duree";
+            spanDuree.textContent = "…";
+            ligne1.append(spanOutil, spanDuree);
 
             const argsDiv = document.createElement("div");
             argsDiv.className = "args";
@@ -489,6 +545,22 @@
             bloc.querySelector(".resultat").textContent =
                 (evenementResultat.erreur ? "✗ " : "✓ ") +
                 JSON.stringify(evenementResultat.resultat);
+        }
+
+        // Reconstruit le panneau debug d'un coup depuis une trace complete
+        // deja connue (relue depuis le journal), par opposition a
+        // ajouterLigneDebug/remplirLigneDebug qui le remplissent en direct
+        // pendant le streaming. Memes deux fonctions, juste appelees sans
+        // etat "en cours" intermediaire puisque tout est deja termine.
+        function afficherTraceComplete(trace) {
+            debugPlan.querySelectorAll(".appel-outil").forEach((n) => n.remove());
+            for (const entree of trace) {
+                const bloc = ajouterLigneDebug(entree.outil, entree.arguments, null);
+                remplirLigneDebug(bloc, entree);
+            }
+            debugPlan.querySelector("summary").textContent = trace.length
+                ? `Voir les appels d'outils (${trace.length})`
+                : "Aucun outil appelé pour ce plan";
         }
 
         // --- Executer les taches cochees ---
@@ -566,8 +638,10 @@
                 // affiche n'est jamais invente cote navigateur.
                 await chargerPlan(planCourant);
                 if (titresBloques.length) {
-                    messageExecution.innerHTML =
-                        `<div class="carte erreur"><pre>Non approuvee(s), bloquee(s) par un refus : ${titresBloques.join(", ")}</pre></div>`;
+                    afficherCarteErreur(
+                        messageExecution,
+                        `Non approuvee(s), bloquee(s) par un refus : ${titresBloques.join(", ")}`
+                    );
                 } else if (resultats.length === 0) {
                     // Aucune action APPROUVEE au moment de l'appel (tout
                     // etait deja tranche avant ce clic) : le dire
@@ -580,8 +654,7 @@
                         '<div class="carte">Exécution terminée. Voir le détail ci-dessus.</div>';
                 }
             } catch (erreur) {
-                messageExecution.innerHTML =
-                    `<div class="carte erreur"><pre>${erreur.message}</pre></div>`;
+                afficherCarteErreur(messageExecution, erreur.message);
             } finally {
                 boutonExecuter.disabled = false;
             }
