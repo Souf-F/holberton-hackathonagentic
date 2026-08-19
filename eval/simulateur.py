@@ -80,6 +80,18 @@ _RESULTATS_OBSERVES = {
         ),
         "nb_actions_avant": 0,
     },
+    "cas_6": {
+        # Plan n°64, Sonnet, 19 aout 2026. 0 action proposee : le texte
+        # exact de la reponse n'a pas ete capture sur ce run (gap dans
+        # eval/run.py corrige juste apres, voir cases.md). Le champ
+        # "etat" par action et "executions" sont ajoutes ici car
+        # _verifier_cas_6 en a besoin, contrairement aux cas 1 a 5.
+        "outils": [],
+        "actions": [],
+        "reponse": "",
+        "nb_actions_avant": 0,
+        "executions": [],
+    },
 }
 
 

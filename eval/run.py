@@ -46,6 +46,11 @@ def executer_plan(intention: str, plan_id: int, origine: str) -> dict:
             outils_appeles.append(evenement["outil"])
         elif evenement["type"] == "fin":
             reponse = evenement["reponse"]
+            # _flux (src/main.py) fait ca normalement ; ce script appelle
+            # planifier_stream() directement, donc sans ca la reponse et
+            # le cout restaient invisibles en base (plans.reponse = NULL)
+            # pour tout run reel, meme reussi.
+            db.enregistrer_reponse(plan_id, evenement["reponse"], evenement)
         elif evenement["type"] == "erreur":
             # Avant ce correctif, ce cas etait ignore en silence : les
             # actions deja proposees avant la coupure restaient dans le
