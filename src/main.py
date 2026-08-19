@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from anthropic import AuthenticationError
+from anthropic import APIConnectionError, APIStatusError, AuthenticationError
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -75,11 +75,44 @@ def _flux(intention: str, plan_id: int, origine: str):
     except AuthenticationError:
         # La cle est presente mais Claude la refuse : revoquee, mal copiee,
         # ou pas encore mise a jour sur l'hebergeur apres une rotation.
+        # Sous-classe de APIStatusError : DOIT rester avant elle, sinon ce
+        # bloc plus precis ne serait jamais atteint.
         yield _sse({
             "type": "erreur",
             "message": "La cle API est refusee par Anthropic. Verifiez "
                        "qu'elle est valide et a jour, en local (.env) "
                        "comme en production.",
+        })
+    except APIConnectionError:
+        # Coupure reseau, timeout, connexion interrompue avant ou pendant
+        # la reponse. C'est exactement le test "je coupe le reseau" du
+        # palier 5 : sans ce filet, l'exception traverse ce generateur en
+        # silence apres que les entetes SSE (200) sont deja partis, et le
+        # navigateur reste bloque sur "Pennyworth reflechit" indefiniment.
+        # Le pire spinner infini possible, sur le pire moment possible.
+        yield _sse({
+            "type": "erreur",
+            "message": "Impossible de contacter Claude (reseau coupe ou "
+                       "delai depasse). Reessayez dans un instant.",
+        })
+    except APIStatusError as erreur_api:
+        # Tout le reste cote API Anthropic hors authentification : surcharge
+        # (529), limite de debit (429), panne cote Anthropic (500/503)...
+        # Le code et le message renvoyes par Anthropic sont plus utiles a
+        # afficher tels quels qu'a generaliser a l'aveugle.
+        yield _sse({
+            "type": "erreur",
+            "message": f"Anthropic a renvoye une erreur (HTTP "
+                       f"{erreur_api.status_code}) : {erreur_api.message}",
+        })
+    except Exception as exc:
+        # Filet de tout dernier recours. Le piege du palier 5 est d'avaler
+        # ce genre de cas en silence pour "que ca ne plante plus" : celui-ci
+        # ne l'est pas, le message reste honnete et visible a l'ecran
+        # plutot que de laisser le flux s'arreter sans explication.
+        yield _sse({
+            "type": "erreur",
+            "message": f"Erreur inattendue : {exc}",
         })
 
 
