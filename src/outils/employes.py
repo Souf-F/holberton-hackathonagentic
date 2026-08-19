@@ -1,13 +1,17 @@
 """Outil de lecture : recherche la fiche d'un collaborateur.
 
 Aucun effet de bord : cette fonction ne modifie jamais rien, elle lit
-uniquement les donnees de test dans seed/employes.json.
+les donnees de test dans seed/employes.json, ET les fiches creees en
+cours de route par l'executeur (voir handlers/create_employee_record.py)
+dans data/employes_crees.json. Sans cette fusion, un collaborateur tout
+juste cree resterait introuvable au tour suivant.
 """
 
 import json
 from pathlib import Path
 
 CHEMIN_DONNEES = Path(__file__).parent.parent.parent / "seed" / "employes.json"
+CHEMIN_CREES = Path(__file__).parent.parent.parent / "data" / "employes_crees.json"
 
 # La description est ce qui guide Claude, pas le prompt systeme : un
 # prompt de 800 lignes ne rattrape jamais une description d'outil floue.
@@ -37,7 +41,10 @@ SCHEMA = {
 
 
 def _charger() -> list:
-    return json.loads(CHEMIN_DONNEES.read_text(encoding="utf-8"))
+    employes = json.loads(CHEMIN_DONNEES.read_text(encoding="utf-8"))
+    if CHEMIN_CREES.exists():
+        employes = employes + json.loads(CHEMIN_CREES.read_text(encoding="utf-8"))
+    return employes
 
 
 def executer(name: str) -> dict:
