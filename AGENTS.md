@@ -3,10 +3,10 @@
 Documentation de la partie agentique de Pennyworth : prompts systeme, outils, et schema
 de la boucle.
 
-**Etat : a jour au 19 aout 2026 (palier 5).** Ce fichier est reste un squelette du
-palier 1 jusqu'a cette date (tools inexistants encore listes, sections "a remplir au
-palier 3" jamais remplies) : corrige ici avec la realite du code, pas les intentions du
-cadrage.
+**Etat : a jour au 19 aout 2026 (palier 6, livraison).** Ce fichier est reste un
+squelette du palier 1 jusqu'a la veille (tools inexistants encore listes, sections "a
+remplir au palier 3" jamais remplies) : corrige avec la realite du code, pas les
+intentions du cadrage, prompt systeme complet inclus mot pour mot.
 
 ---
 
