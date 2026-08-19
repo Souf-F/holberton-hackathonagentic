@@ -101,6 +101,15 @@
             create_calendar_event: "Poser un événement de calendrier",
         };
 
+        // Outils pour lesquels une vraie annulation existe cote executeur
+        // (voir ANNULATEURS dans src/executeur/handlers/__init__.py). Le
+        // champ action.reversible du backend decrit une notion plus large
+        // (l'outil est conceptuellement annulable), pas cette liste precise :
+        // s'y fier ici afficherait "annulable" sur des actions qui n'ont en
+        // realite aucun bouton Annuler dans le journal. Meme liste que
+        // OUTILS_ANNULABLES dans journal.html, a garder synchronisee.
+        const OUTILS_VRAIMENT_ANNULABLES = new Set(["create_github_issue"]);
+
         champ.addEventListener("focus", () => exemple.classList.add("visible"));
         champ.addEventListener("blur", () => exemple.classList.remove("visible"));
 
@@ -532,9 +541,10 @@
 
             const badges = document.createElement("div");
             badges.className = "badges";
+            const vraimentAnnulable = OUTILS_VRAIMENT_ANNULABLES.has(action.outil);
             badges.appendChild(creerBadge(
-                action.reversible ? "annulable" : "IRRÉVERSIBLE",
-                action.reversible ? "" : "badge-irreversible"
+                vraimentAnnulable ? "annulable" : "IRRÉVERSIBLE",
+                vraimentAnnulable ? "" : "badge-irreversible"
             ));
             if (action.origine === "HUMAIN") {
                 badges.appendChild(creerBadge("ajoutée par vous", ""));
