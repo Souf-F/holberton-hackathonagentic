@@ -10,14 +10,26 @@ humaine, action par action.**
 Hackathon Full Stack Agentique, Holberton School. Sujet 03, LE BRAS.
 Binome : [Adam](https://github.com/Adamzou-lab) et [Souf](https://github.com/Souf-F).
 
-**Etat : palier 4 (MVP) termine. Palier 5 (durcissement) en cours : compensation,
-securite, documentation.**
+**Etat : paliers 1 a 5 termines (socle, premier outil, MVP, durcissement). Palier 6
+(livraison) en cours : documentation finale, tag `v1.0`, demo scriptee.**
 
 **En ligne : https://pennyworth.adamzou.fr**
 
 > Heberge sur Render, plan gratuit. Le service se met en veille apres 15 minutes
 > sans visite : la premiere requete peut prendre 30 a 50 secondes, le temps du
 > reveil. Les suivantes sont immediates.
+
+---
+
+## Sommaire
+
+- [Quickstart](#quickstart)
+- [Architecture en une phrase](#architecture-en-une-phrase)
+- [Choix techniques](#choix-techniques)
+- [Securite](#securite)
+- [Limites connues](#limites-connues)
+- [Conventions de travail](#conventions-de-travail)
+- [Livrables](#livrables)
 
 ---
 
@@ -113,9 +125,9 @@ Schema detaille, cycle de vie d'une action et signatures d'outils : voir [SPEC.m
 **Convention sur le modele, adoptee pendant le durcissement :** Sonnet pour toutes les
 phases de test et d'iteration (moins cher), Opus reserve a la version officielle
 (checkpoint, demo). Toujours rejouer `make eval` sur Opus juste avant un checkpoint reel
-: un score obtenu sur Sonnet ne garantit pas le meme resultat sur Opus (verifie une fois
-en pratique, les deux ont pourtant echoue de la meme facon sur un defaut du script
-d'eval, pas du modele -- la prudence reste justifiee).
+: un score obtenu sur Sonnet ne garantit pas le meme resultat sur Opus. Verifie une fois
+en pratique : les deux ont pourtant echoue de la meme facon, a cause d'un defaut du
+script d'eval, pas du modele. La prudence reste justifiee quand meme.
 
 Le raisonnement complet, et surtout **ce que nous avons ecarte et pourquoi**, sont dans la
 section "Choix techniques, et ce que nous avons ecarte" de [SPEC.md](./SPEC.md).
@@ -293,11 +305,11 @@ dit avant, pour eviter les conflits sur le fichier de dependances.
 | Livrable | Etat |
 |---|---|
 | `SPEC.md` | fait, palier 1 |
-| `README.md` | fait, palier 5 (securite, quickstart, limites connues) |
+| `README.md` | fait, palier 6 (securite, quickstart, limites connues, choix techniques) |
 | `SECURITE.md` | fait, palier 5 (revue complete, 27 ajouts) |
-| `AGENTS.md` | squelette, a remplir au palier 3 |
-| `JOURNAL.md` | en cours, une entree par palier |
+| `AGENTS.md` | fait, palier 6 (outils reels, prompt systeme verbatim, reponse a la question d'injection) |
+| `JOURNAL.md` | a jour, 7 entrees, une par palier (deux quand le palier a ete scinde entre nous) |
 | `.env.example` | fait |
 | `.gitignore` | fait |
-| Tag `v1.0` | palier 6 |
-| Demo scriptee 5 min | palier 6 |
+| Tag `v1.0` | dernier, une fois tout le reste fige (voir palier 6) |
+| Demo scriptee 5 min | redigee, a repeter et chronometrer avec Souf avant le checkpoint |
